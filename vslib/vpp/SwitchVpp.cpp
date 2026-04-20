@@ -788,6 +788,12 @@ uint64_t SwitchVpp::getObjectTypeAvailability(
         return static_cast<uint64_t>(m_maxMySidEntries - m_srv6_my_sid_count);
     }
 
+    if (object_type == SAI_OBJECT_TYPE_MIRROR_SESSION)
+    {
+        // Return available mirror sessions (max - used)
+        return static_cast<uint64_t>(m_maxMirrorSessions - m_mirror_session_count);
+    }
+
     // Return 0 for unsupported types
     return 0;
 }
@@ -1030,6 +1036,12 @@ sai_status_t SwitchVpp::create(
         SWSS_LOG_INFO("L2 VXLAN tunnel create for %s: status=%d sw_if_index=%u",
             serializedObjectId.c_str(), status, sw_if_index);
         return status;
+    }
+
+    if(object_type == SAI_OBJECT_TYPE_MIRROR_SESSION) {
+        sai_object_id_t object_id;
+        sai_deserialize_object_id(serializedObjectId, object_id);
+        return createMirrorSession(object_id, switch_id, attr_count, attr_list);
     }
 
     return create_internal(object_type, serializedObjectId, switch_id, attr_count, attr_list);
@@ -1348,6 +1360,12 @@ sai_status_t SwitchVpp::remove(
         return remove_internal(object_type, serializedObjectId);
     }
 
+    if(object_type == SAI_OBJECT_TYPE_MIRROR_SESSION) {
+        sai_object_id_t object_id;
+        sai_deserialize_object_id(serializedObjectId, object_id);
+        return removeMirrorSession(object_id);
+    }
+
     return remove_internal(object_type, serializedObjectId);
 }
 
@@ -1388,6 +1406,34 @@ sai_status_t SwitchVpp::setPort(
     UpdatePort(portId, 1, attr);
 
     auto sid = sai_serialize_object_id(portId);
+
+    if(attr->id == SAI_PORT_ATTR_INGRESS_MIRROR_SESSION ||
+       attr->id == SAI_PORT_ATTR_EGRESS_MIRROR_SESSION)
+    {
+        std::string src_hwif;
+        if(!vpp_get_hwif_name(portId, 0, src_hwif)) {
+            SWSS_LOG_ERROR("Failed to get hwif name for port %s", sid.c_str());
+            return SAI_STATUS_FAILURE;
+        }
+        uint32_t src_sw_if = get_sw_if_idx(src_hwif.c_str());
+
+        if(attr->value.objlist.count > 0) {
+            // bind
+            sai_object_id_t session_oid = attr->value.objlist.list[0];
+            auto it = m_mirror_sessions.find(session_oid);
+            if(it == m_mirror_sessions.end()) {
+                SWSS_LOG_ERROR("Mirror session %s not found for port %s", sai_serialize_object_id(session_oid).c_str(), sid.c_str());
+                return SAI_STATUS_FAILURE;
+            }
+
+            bool is_ingress = (attr->id == SAI_PORT_ATTR_INGRESS_MIRROR_SESSION);
+            uint8_t state = is_ingress ? 1 : 2;  // 1 = RX, 2 = TX
+            vpp_span_enable_disable(src_sw_if, it->second.sw_if_index, state, false);
+        } else {
+            // unbind: state = 0
+            vpp_span_enable_disable(src_sw_if, 0, 0, false);
+        }
+    }
 
     return set_internal(SAI_OBJECT_TYPE_PORT, sid, attr);
 }

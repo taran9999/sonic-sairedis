@@ -326,6 +326,46 @@
 #include <vnet/bfd/bfd.api.h>
 #undef vl_api_version
 
+/* SPAN API inclusion */
+#include <vnet/span/span.api_enum.h>
+#include <vnet/span/span.api_types.h>
+
+#define vl_typedefs
+#include <vnet/span/span.api.h>
+#undef vl_typedefs
+
+#define vl_endianfun
+#include <vnet/span/span.api.h>
+#undef vl_endianfun
+
+#define vl_calcsizefun
+#include <vnet/span/span.api.h>
+#undef vl_calcsizefun
+
+#define vl_api_version(n, v) static u32 span_api_version = v;
+#include <vnet/span/span.api.h>
+#undef vl_api_version
+
+/* GRE API inclusion */
+#include <vnet/gre/gre.api_enum.h>
+#include <vnet/gre/gre.api_types.h>
+
+#define vl_typedefs
+#include <vnet/gre/gre.api.h>
+#undef vl_typedefs
+
+#define vl_endianfun
+#include <vnet/gre/gre.api.h>
+#undef vl_endianfun
+
+#define vl_calcsizefun
+#include <vnet/gre/gre.api.h>
+#undef vl_calcsizefun
+
+#define vl_api_version(n, v) static u32 gre_api_version = v;
+#include <vnet/gre/gre.api.h>
+#undef vl_api_version
+
 
 void classify_get_trace_chain(void ){}
 void os_exit(int code) {}
@@ -1204,6 +1244,28 @@ vl_api_sr_set_encap_source_reply_t_handler(vl_api_sr_set_encap_source_reply_t *m
     else { SAIVPP_INFO("sr set encap source successful"); }
 }
 
+static void
+vl_api_sw_interface_span_enable_disable_reply_t_handler(vl_api_sw_interface_span_enable_disable_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+
+    if (retval) { SAIVPP_ERROR("span enable/disable failed(%d)", retval); }
+    else { SAIVPP_INFO("span enable/disable successful"); }
+}
+
+static void
+vl_api_gre_tunnel_add_del_reply_t_handler(vl_api_gre_tunnel_add_del_reply_t *msg)
+{
+    set_reply_sw_if_index(ntohl(msg->sw_if_index));
+
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+
+    if (retval) { SAIVPP_ERROR("gre_tunnel_add_del handler failed(%d)", retval); }
+    else { SAIVPP_INFO("gre_tunnel_add_del handler successful: if_idx,%d", ntohl(msg->sw_if_index)); }
+}
+
 #define vl_api_get_first_msg_id_reply_t_handler vl_noop_handler
 #define vl_api_get_first_msg_id_reply_t_handler_json vl_noop_handler
 
@@ -1219,6 +1281,8 @@ static u16 tunterm_msg_id_base;
 static u16 bfd_msg_id_base;
 static u16 sr_msg_id_base;
 static u16 bond_msg_id_base;
+static u16 span_msg_id_base;
+static u16 gre_msg_id_base;
 
 static void vpp_base_vpe_init(void)
 {
@@ -1254,6 +1318,12 @@ static void vpp_base_vpe_init(void)
 
 #define BFD_MSG_ID(id) \
     (VL_API_##id + bfd_msg_id_base)
+
+#define SPAN_MSG_ID(id) \
+    (VL_API_##id + span_msg_id_base)
+
+#define GRE_MSG_ID(id) \
+    (VL_API_##id + gre_msg_id_base)
 
 #define foreach_vpe_ext_api_reply_msg                                   \
     _(INTERFACE_MSG_ID(SW_INTERFACE_DETAILS), sw_interface_details)     \
@@ -1294,6 +1364,8 @@ static void vpp_base_vpe_init(void)
     _(BFD_MSG_ID(BFD_UDP_SESSION_EVENT), bfd_udp_session_event) \
     _(BFD_MSG_ID(WANT_BFD_EVENTS_REPLY), want_bfd_events_reply) \
     _(BFD_MSG_ID(BFD_UDP_ENABLE_MULTIHOP_REPLY), bfd_udp_enable_multihop_reply) \
+    _(SPAN_MSG_ID(SW_INTERFACE_SPAN_ENABLE_DISABLE_REPLY), sw_interface_span_enable_disable_reply) \
+    _(GRE_MSG_ID(GRE_TUNNEL_ADD_DEL_REPLY), gre_tunnel_add_del_reply) \
 
 
 static u16 ip_msg_id_base, ip_nbr_msg_id_base, lcp_msg_id_base;
@@ -1474,6 +1546,14 @@ static void get_base_msg_id()
     msg_base_lookup_name = format (0, "tunterm_acl_%08x%c", tunterm_api_version, 0);
     tunterm_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
     assert(tunterm_msg_id_base != (u16) ~0);
+
+    msg_base_lookup_name = format (0, "span_%08x%c", span_api_version, 0);
+    span_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
+    assert(span_msg_id_base != (u16) ~0);
+
+    msg_base_lookup_name = format (0, "gre_%08x%c", gre_api_version, 0);
+    gre_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
+    assert(gre_msg_id_base != (u16) ~0);
 }
 
 #define API_SOCKET_FILE "/run/vpp/api.sock"
@@ -3996,5 +4076,93 @@ int vpp_sr_set_encap_source(vpp_ip_addr_t *encap_src)
 
     VPP_UNLOCK();
 
+    return ret;
+}
+
+int vpp_span_enable_disable(uint32_t sw_if_index_from, uint32_t sw_if_index_to, uint8_t state, bool is_l2)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sw_interface_span_enable_disable_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = span_msg_id_base;
+
+    M (SW_INTERFACE_SPAN_ENABLE_DISABLE, mp);
+
+    mp->sw_if_index_from = htonl(sw_if_index_from);
+    mp->sw_if_index_to = htonl(sw_if_index_to);
+    mp->state = state;
+    mp->is_l2 = is_l2;
+
+    S (mp);
+    WR (ret);
+
+    SAIVPP_INFO("span enable/disable: from=%d to=%d state=%d is_l2=%d ret=%d", sw_if_index_from, sw_if_index_to, state, is_l2, ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+
+}
+
+int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_index)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_gre_add_del_tunnel_v2_t *mp;
+    int ret;
+    vpp_ip_addr_t *addr;
+    vl_api_address_t *api_addr;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = gre_msg_id_base;
+
+    M (GRE_ADD_DEL_TUNNEL_V2, mp);
+
+    mp->is_add = is_add;
+    mp->tunnel.type = tunnel->type;
+    mp->tunnel.session_id = htonl(tunnel->session_id);
+    mp->tunnel.instance = htonl(tunnel->instance);
+    mp->tunnel.outer_table_id = htonl(tunnel->outer_table_id);
+
+    api_addr = &mp->tunnel.src;
+    addr = &tunnel->src;
+    if (addr->sa_family == AF_INET) {
+        struct sockaddr_in *ip4 = &addr->addr.ip4;
+        api_addr->af = ADDRESS_IP4;
+        memcpy(api_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(api_addr->un.ip4));
+    } else if (addr->sa_family == AF_INET6) {
+        struct sockaddr_in6 *ip6 =  &addr->addr.ip6;
+        api_addr->af = ADDRESS_IP6;
+        memcpy(api_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(api_addr->un.ip6));
+    } else {
+            VPP_UNLOCK();
+            return -EINVAL;
+    }
+
+    api_addr = &mp->tunnel.dst;
+    addr = &tunnel->dst;
+    if (addr->sa_family == AF_INET) {
+        struct sockaddr_in *ip4 = &addr->addr.ip4;
+        api_addr->af = ADDRESS_IP4;
+        memcpy(api_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(api_addr->un.ip4));
+    } else if (addr->sa_family == AF_INET6) {
+        struct sockaddr_in6 *ip6 =  &addr->addr.ip6;
+        api_addr->af = ADDRESS_IP6;
+        memcpy(api_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(api_addr->un.ip6));
+    } else {
+            VPP_UNLOCK();
+            return -EINVAL;
+    }
+
+    S (mp);
+    WR (ret);
+
+    *sw_if_index = vam->sw_if_index;
+    SAIVPP_INFO("gre_add_del: is_add=%d type=%u session_id=%u instance=%u if_index=%d ret=%d", is_add, tunnel->type, tunnel->session_id, tunnel->instance, vam->sw_if_index, ret);
+
+    VPP_UNLOCK();
     return ret;
 }
