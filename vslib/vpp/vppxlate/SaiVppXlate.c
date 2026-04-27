@@ -45,6 +45,9 @@
 #include <vpp_plugins/linux_cp/lcp.api_enum.h>
 #include <vpp_plugins/linux_cp/lcp.api_types.h>
 
+#include <vpp_plugins/gre/gre.api_enum.h>
+#include <vpp_plugins/gre/gre.api_types.h>
+
 #include <vpp_plugins/acl/acl.api_enum.h>
 #include <vpp_plugins/acl/acl.api_types.h>
 
@@ -338,6 +341,10 @@
 #include <vnet/span/span.api.h>
 #undef vl_endianfun
 
+#define vl_printfun
+#include <vnet/span/span.api.h>
+#undef vl_printfun
+
 #define vl_calcsizefun
 #include <vnet/span/span.api.h>
 #undef vl_calcsizefun
@@ -347,25 +354,25 @@
 #undef vl_api_version
 
 /* GRE API inclusion */
-#include <vnet/gre/gre.api_enum.h>
-#include <vnet/gre/gre.api_types.h>
-
 #define vl_typedefs
-#include <vnet/gre/gre.api.h>
+#include <vpp_plugins/gre/gre.api.h>
 #undef vl_typedefs
 
 #define vl_endianfun
-#include <vnet/gre/gre.api.h>
+#include <vpp_plugins/gre/gre.api.h>
 #undef vl_endianfun
 
+// #define vl_printfun
+// #include <vpp_plugins/gre/gre.api.h>
+// #undef vl_printfun
+
 #define vl_calcsizefun
-#include <vnet/gre/gre.api.h>
+#include <vpp_plugins/gre/gre.api.h>
 #undef vl_calcsizefun
 
 #define vl_api_version(n, v) static u32 gre_api_version = v;
-#include <vnet/gre/gre.api.h>
+#include <vpp_plugins/gre/gre.api.h>
 #undef vl_api_version
-
 
 void classify_get_trace_chain(void ){}
 void os_exit(int code) {}
@@ -1365,8 +1372,6 @@ static void vpp_base_vpe_init(void)
     _(BFD_MSG_ID(WANT_BFD_EVENTS_REPLY), want_bfd_events_reply) \
     _(BFD_MSG_ID(BFD_UDP_ENABLE_MULTIHOP_REPLY), bfd_udp_enable_multihop_reply) \
     _(SPAN_MSG_ID(SW_INTERFACE_SPAN_ENABLE_DISABLE_REPLY), sw_interface_span_enable_disable_reply) \
-    _(GRE_MSG_ID(GRE_TUNNEL_ADD_DEL_REPLY), gre_tunnel_add_del_reply) \
-
 
 static u16 ip_msg_id_base, ip_nbr_msg_id_base, lcp_msg_id_base;
 static u16 acl_msg_id_base;
@@ -1386,6 +1391,16 @@ static void vpp_ext_vpe_init(void)
 
     foreach_vpe_ext_api_reply_msg;
 #undef _
+
+// no tojson/fromjson for gre
+vl_msg_api_set_handlers(GRE_MSG_ID(GRE_TUNNEL_ADD_DEL_REPLY),
+                        "gre_tunnel_add_del_reply",
+                        vl_api_gre_tunnel_add_del_reply_t_handler,
+                        vl_noop_handler,
+                        vl_api_gre_tunnel_add_del_reply_t_endian,
+                        sizeof(vl_api_gre_tunnel_add_del_reply_t), 1,
+                        0, 0,
+                        vl_api_gre_tunnel_add_del_reply_t_calc_size);
 }
 
 static void vl_api_lcp_itf_pair_add_del_reply_t_handler(vl_api_lcp_itf_pair_add_del_reply_t *msg)
@@ -3786,6 +3801,17 @@ const char * vpp_get_swif_name (const u32 swif_idx)
     return get_swif_name(vam, swif_idx);
 }
 
+int get_sw_if_idx(const char *ifname)
+{
+    vat_main_t *vam = &vat_main;
+
+    VPP_LOCK();
+    u32 idx = get_swif_idx(vam, ifname);
+    VPP_UNLOCK();
+
+    return (int)idx;
+}
+
 
 int delete_bond_member(const char * hwif_name)
 {
@@ -4110,7 +4136,7 @@ int vpp_span_enable_disable(uint32_t sw_if_index_from, uint32_t sw_if_index_to, 
 int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_index)
 {
     vat_main_t *vam = &vat_main;
-    vl_api_gre_add_del_tunnel_v2_t *mp;
+    vl_api_gre_tunnel_add_del_v2_t *mp;
     int ret;
     vpp_ip_addr_t *addr;
     vl_api_address_t *api_addr;
@@ -4119,11 +4145,11 @@ int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_ind
 
     __plugin_msg_base = gre_msg_id_base;
 
-    M (GRE_ADD_DEL_TUNNEL_V2, mp);
+    M (GRE_TUNNEL_ADD_DEL_V2, mp);
 
     mp->is_add = is_add;
     mp->tunnel.type = tunnel->type;
-    mp->tunnel.session_id = htonl(tunnel->session_id);
+    mp->tunnel.session_id = htons(tunnel->session_id);
     mp->tunnel.instance = htonl(tunnel->instance);
     mp->tunnel.outer_table_id = htonl(tunnel->outer_table_id);
 

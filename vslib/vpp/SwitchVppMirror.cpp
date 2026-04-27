@@ -53,17 +53,19 @@ sai_status_t SwitchVpp::createMirrorSession(
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
         tunnel.type = 2;
         tunnel.session_id = m_next_erspan_session_id++;
-        tunnel.instance = ~0;
+        tunnel.outer_table_id = 0;
 
-        uint32_t sw_if_index = 0;
-        int ret = vpp_gre_tunnel_add_del(&tunnel, true, &sw_if_index);
+        int ret = vpp_gre_tunnel_add_del(&tunnel, true, &tunnel.instance);
         if(ret != 0) {
             SWSS_LOG_ERROR("Failed to add GRE tunnel for ERSPAN session, ret=%d", ret);
             return SAI_STATUS_FAILURE;
         }
 
-        info.sw_if_index = sw_if_index;
+        info.sw_if_index = tunnel.instance;
         info.is_erspan = true;
+        info.src_ip = tunnel.src;
+        info.dst_ip = tunnel.dst;
+        info.session_id = tunnel.session_id;
     } else {
         SWSS_LOG_ERROR("Unsupported mirror session type %d", mirror_type);
         return SAI_STATUS_FAILURE;
@@ -95,9 +97,15 @@ sai_status_t SwitchVpp::removeMirrorSession(
 
     if(info.is_erspan) {
         vpp_gre_tunnel_t tunnel;
-        tunnel.sw_if_index = info.sw_if_index;
+        tunnel.instance = info.sw_if_index;
+        tunnel.type = 2;
+        tunnel.src = info.src_ip;
+        tunnel.dst = info.dst_ip;
+        tunnel.session_id = info.session_id;
+        tunnel.outer_table_id = 0;
 
-        int ret = vpp_gre_tunnel_add_del(&tunnel, false, nullptr);
+        uint32_t sw_if_index = 0;
+        int ret = vpp_gre_tunnel_add_del(&tunnel, false, &sw_if_index);
         if(ret != 0) {
             SWSS_LOG_ERROR("Failed to remove GRE tunnel for ERSPAN session, ret=%d", ret);
             return SAI_STATUS_FAILURE;

@@ -1018,6 +1018,9 @@ namespace saivs
             struct MirrorSessionInfo {
                 uint32_t sw_if_index;
                 bool is_erspan;
+                vpp_ip_addr_t src_ip;
+                vpp_ip_addr_t dst_ip;
+                uint16_t session_id;
             };
 
             std::map<sai_object_id_t, MirrorSessionInfo> m_mirror_sessions;
