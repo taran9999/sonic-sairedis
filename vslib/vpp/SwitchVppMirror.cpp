@@ -16,7 +16,7 @@ sai_status_t SwitchVpp::createMirrorSession(
 
     const sai_attribute_value_t *value;
     uint32_t attr_index;
-    MirrorSessionInfo info;
+    MirrorSessionInfo info{};
 
     auto sid = sai_serialize_object_id(object_id);
 
@@ -48,11 +48,12 @@ sai_status_t SwitchVpp::createMirrorSession(
         CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, &value, &attr_index));
         sai_ip_address_t dst_ip = value->ipaddr;
 
-        vpp_gre_tunnel_t tunnel;
+        vpp_gre_tunnel_t tunnel{};
         sai_ip_address_t_to_vpp_ip_addr_t(src_ip, tunnel.src);
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
         tunnel.type = 2;
         tunnel.session_id = m_next_erspan_session_id++;
+        tunnel.instance = 0;
         tunnel.outer_table_id = 0;
 
         int ret = vpp_gre_tunnel_add_del(&tunnel, true, &tunnel.instance);
@@ -96,7 +97,7 @@ sai_status_t SwitchVpp::removeMirrorSession(
     MirrorSessionInfo &info = it->second;
 
     if(info.is_erspan) {
-        vpp_gre_tunnel_t tunnel;
+        vpp_gre_tunnel_t tunnel{};
         tunnel.instance = info.sw_if_index;
         tunnel.type = 2;
         tunnel.src = info.src_ip;
