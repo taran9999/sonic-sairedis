@@ -1433,7 +1433,7 @@ sai_status_t SwitchVpp::setPort(
             } else {
                 // unbind: state = 0
                 SWSS_LOG_INFO("VPP span disable: src_sw_if=%u, src_hwif_name=%s", src_sw_if, src_hwif.c_str());
-                vpp_span_enable_disable(src_sw_if, 0, 0, false);
+                vpp_span_enable_disable(src_sw_if, ~0, 0, false);
             }
         }
     }
