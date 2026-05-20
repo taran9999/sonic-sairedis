@@ -1426,10 +1426,13 @@ sai_status_t SwitchVpp::setPort(
                 } else {
                     bool is_ingress = (attr->id == SAI_PORT_ATTR_INGRESS_MIRROR_SESSION);
                     uint8_t state = is_ingress ? 1 : 2;  // 1 = RX, 2 = TX
+
+                    SWSS_LOG_INFO("VPP span enable: src_sw_if=%u, src_hwif_name=%s, dst_sw_if=%u, state=%u", src_sw_if, src_hwif.c_str(), it->second.sw_if_index, state);
                     vpp_span_enable_disable(src_sw_if, it->second.sw_if_index, state, false);
                 }
             } else {
                 // unbind: state = 0
+                SWSS_LOG_INFO("VPP span disable: src_sw_if=%u, src_hwif_name=%s", src_sw_if, src_hwif.c_str());
                 vpp_span_enable_disable(src_sw_if, 0, 0, false);
             }
         }

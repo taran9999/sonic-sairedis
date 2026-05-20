@@ -39,6 +39,9 @@ sai_status_t SwitchVpp::createMirrorSession(
             return SAI_STATUS_FAILURE;
         }
 
+        SWSS_LOG_INFO("SPAN mirror session info: monitor_port=%s, hwif_name=%s, sw_if_index=%d",
+            sai_serialize_object_id(monitor_port).c_str(), hwif_name.c_str(), sw_idx);
+        
         info.sw_if_index = (uint32_t)sw_idx;
         info.is_erspan = false;
     } else if(mirror_type == SAI_MIRROR_SESSION_TYPE_ENHANCED_REMOTE) {
@@ -77,8 +80,8 @@ sai_status_t SwitchVpp::createMirrorSession(
     m_mirror_sessions[object_id] = info;
     m_mirror_session_count++;
 
-    SWSS_LOG_INFO("Created mirror session %s, type=%d, sw_if_index=%u, is_erspan=%d",
-        sid.c_str(), mirror_type, info.sw_if_index, info.is_erspan);
+    SWSS_LOG_NOTICE("Created mirror session %s, type=%d, sw_if_index=%u, is_erspan=%d, mirror session count: %d",
+        sid.c_str(), mirror_type, info.sw_if_index, info.is_erspan, m_mirror_session_count);
 
     return SAI_STATUS_SUCCESS;
 }
@@ -118,7 +121,7 @@ sai_status_t SwitchVpp::removeMirrorSession(
     m_mirror_sessions.erase(it);
     m_mirror_session_count--;
 
-    SWSS_LOG_INFO("Removed mirror session %s", sai_serialize_object_id(object_id).c_str());
+    SWSS_LOG_NOTICE("Removed mirror session %s, mirror session count: %d", sai_serialize_object_id(object_id).c_str(), m_mirror_session_count);
 
     return SAI_STATUS_SUCCESS;
 }
