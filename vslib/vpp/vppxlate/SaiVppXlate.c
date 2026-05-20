@@ -4119,7 +4119,7 @@ int vpp_span_enable_disable(uint32_t sw_if_index_from, uint32_t sw_if_index_to, 
 
     mp->sw_if_index_from = htonl(sw_if_index_from);
     mp->sw_if_index_to = htonl(sw_if_index_to);
-    mp->state = state;
+    mp->state = htonl((uint32_t)state);
     mp->is_l2 = is_l2;
 
     S (mp);
