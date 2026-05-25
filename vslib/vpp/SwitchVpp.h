@@ -1025,6 +1025,16 @@ namespace saivs
 
             std::map<sai_object_id_t, MirrorSessionInfo> m_mirror_sessions;
 
+            struct PortMirrorBinding {
+                sai_object_id_t session_oid;
+                bool rx;
+                bool tx;
+                uint32_t dst_sw_if_idx;
+            };
+
+            // port id to PortMirrorBinding
+            std::map<sai_object_id_t, PortMirrorBinding> m_port_mirror_bindings;
+
         protected:
                 sai_status_t createMirrorSession(
                         _In_ sai_object_id_t object_id,
