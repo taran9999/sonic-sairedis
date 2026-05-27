@@ -45,9 +45,6 @@
 #include <vpp_plugins/linux_cp/lcp.api_enum.h>
 #include <vpp_plugins/linux_cp/lcp.api_types.h>
 
-#include <vpp_plugins/gre/gre.api_enum.h>
-#include <vpp_plugins/gre/gre.api_types.h>
-
 #include <vpp_plugins/acl/acl.api_enum.h>
 #include <vpp_plugins/acl/acl.api_types.h>
 
@@ -351,27 +348,6 @@
 
 #define vl_api_version(n, v) static u32 span_api_version = v;
 #include <vnet/span/span.api.h>
-#undef vl_api_version
-
-/* GRE API inclusion */
-#define vl_typedefs
-#include <vpp_plugins/gre/gre.api.h>
-#undef vl_typedefs
-
-#define vl_endianfun
-#include <vpp_plugins/gre/gre.api.h>
-#undef vl_endianfun
-
-// #define vl_printfun
-// #include <vpp_plugins/gre/gre.api.h>
-// #undef vl_printfun
-
-#define vl_calcsizefun
-#include <vpp_plugins/gre/gre.api.h>
-#undef vl_calcsizefun
-
-#define vl_api_version(n, v) static u32 gre_api_version = v;
-#include <vpp_plugins/gre/gre.api.h>
 #undef vl_api_version
 
 void classify_get_trace_chain(void ){}
@@ -1261,18 +1237,6 @@ vl_api_sw_interface_span_enable_disable_reply_t_handler(vl_api_sw_interface_span
     else { SAIVPP_INFO("span enable/disable successful"); }
 }
 
-static void
-vl_api_gre_tunnel_add_del_v2_reply_t_handler(vl_api_gre_tunnel_add_del_v2_reply_t *msg)
-{
-    set_reply_sw_if_index(ntohl(msg->sw_if_index));
-
-    int retval = (int)ntohl((uint32_t)msg->retval);
-    set_reply_status(retval);
-
-    if (retval) { SAIVPP_ERROR("gre_tunnel_add_del_v2 handler failed(%d)", retval); }
-    else { SAIVPP_INFO("gre_tunnel_add_del_v2 handler successful: if_idx,%d", ntohl(msg->sw_if_index)); }
-}
-
 #define vl_api_get_first_msg_id_reply_t_handler vl_noop_handler
 #define vl_api_get_first_msg_id_reply_t_handler_json vl_noop_handler
 
@@ -1289,7 +1253,6 @@ static u16 bfd_msg_id_base;
 static u16 sr_msg_id_base;
 static u16 bond_msg_id_base;
 static u16 span_msg_id_base;
-static u16 gre_msg_id_base;
 
 static void vpp_base_vpe_init(void)
 {
@@ -1328,9 +1291,7 @@ static void vpp_base_vpe_init(void)
 
 #define SPAN_MSG_ID(id) \
     (VL_API_##id + span_msg_id_base)
-
-#define GRE_MSG_ID(id) \
-    (VL_API_##id + gre_msg_id_base)
+    
 
 #define foreach_vpe_ext_api_reply_msg                                   \
     _(INTERFACE_MSG_ID(SW_INTERFACE_DETAILS), sw_interface_details)     \
@@ -1392,15 +1353,7 @@ static void vpp_ext_vpe_init(void)
     foreach_vpe_ext_api_reply_msg;
 #undef _
 
-// no tojson/fromjson for gre
-vl_msg_api_set_handlers(GRE_MSG_ID(GRE_TUNNEL_ADD_DEL_V2_REPLY),
-                        "gre_tunnel_add_del_v2_reply",
-                        vl_api_gre_tunnel_add_del_v2_reply_t_handler,
-                        vl_noop_handler,
-                        vl_api_gre_tunnel_add_del_v2_reply_t_endian,
-                        sizeof(vl_api_gre_tunnel_add_del_v2_reply_t), 1,
-                        0, 0,
-                        vl_api_gre_tunnel_add_del_v2_reply_t_calc_size);
+
 }
 
 static void vl_api_lcp_itf_pair_add_del_reply_t_handler(vl_api_lcp_itf_pair_add_del_reply_t *msg)
@@ -1565,10 +1518,6 @@ static void get_base_msg_id()
     msg_base_lookup_name = format (0, "span_%08x%c", span_api_version, 0);
     span_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
     assert(span_msg_id_base != (u16) ~0);
-
-    msg_base_lookup_name = format (0, "gre_%08x%c", gre_api_version, 0);
-    gre_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
-    assert(gre_msg_id_base != (u16) ~0);
 }
 
 #define API_SOCKET_FILE "/run/vpp/api.sock"
@@ -4131,64 +4080,4 @@ int vpp_span_enable_disable(uint32_t sw_if_index_from, uint32_t sw_if_index_to, 
 
     return ret;
 
-}
-
-int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_index)
-{
-    vat_main_t *vam = &vat_main;
-    vl_api_gre_tunnel_add_del_v2_t *mp;
-    int ret;
-    vpp_ip_addr_t *addr;
-    vl_api_address_t *api_addr;
-
-    VPP_LOCK();
-
-    __plugin_msg_base = gre_msg_id_base;
-
-    M (GRE_TUNNEL_ADD_DEL_V2, mp);
-
-    mp->is_add = is_add;
-    mp->tunnel.type = tunnel->type;
-    mp->tunnel.session_id = htons(tunnel->session_id);
-    mp->tunnel.instance = htonl(tunnel->instance);
-    mp->tunnel.outer_table_id = htonl(tunnel->outer_table_id);
-
-    api_addr = &mp->tunnel.src;
-    addr = &tunnel->src;
-    if (addr->sa_family == AF_INET) {
-        struct sockaddr_in *ip4 = &addr->addr.ip4;
-        api_addr->af = ADDRESS_IP4;
-        memcpy(api_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(api_addr->un.ip4));
-    } else if (addr->sa_family == AF_INET6) {
-        struct sockaddr_in6 *ip6 =  &addr->addr.ip6;
-        api_addr->af = ADDRESS_IP6;
-        memcpy(api_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(api_addr->un.ip6));
-    } else {
-            VPP_UNLOCK();
-            return -EINVAL;
-    }
-
-    api_addr = &mp->tunnel.dst;
-    addr = &tunnel->dst;
-    if (addr->sa_family == AF_INET) {
-        struct sockaddr_in *ip4 = &addr->addr.ip4;
-        api_addr->af = ADDRESS_IP4;
-        memcpy(api_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(api_addr->un.ip4));
-    } else if (addr->sa_family == AF_INET6) {
-        struct sockaddr_in6 *ip6 =  &addr->addr.ip6;
-        api_addr->af = ADDRESS_IP6;
-        memcpy(api_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(api_addr->un.ip6));
-    } else {
-            VPP_UNLOCK();
-            return -EINVAL;
-    }
-
-    S (mp);
-    WR (ret);
-
-    *sw_if_index = vam->sw_if_index;
-    SAIVPP_INFO("gre_add_del: is_add=%d type=%u session_id=%u instance=%u if_index=%d ret=%d", is_add, tunnel->type, tunnel->session_id, tunnel->instance, vam->sw_if_index, ret);
-
-    VPP_UNLOCK();
-    return ret;
 }
