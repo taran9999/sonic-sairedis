@@ -44,32 +44,6 @@ sai_status_t SwitchVpp::createMirrorSession(
         
         info.sw_if_index = (uint32_t)sw_idx;
         info.is_erspan = false;
-    } else if(mirror_type == SAI_MIRROR_SESSION_TYPE_ENHANCED_REMOTE) {
-        CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_SRC_IP_ADDRESS, &value, &attr_index));
-        sai_ip_address_t src_ip = value->ipaddr;
-
-        CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, &value, &attr_index));
-        sai_ip_address_t dst_ip = value->ipaddr;
-
-        vpp_gre_tunnel_t tunnel{};
-        sai_ip_address_t_to_vpp_ip_addr_t(src_ip, tunnel.src);
-        sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
-        tunnel.type = 2;
-        tunnel.session_id = m_next_erspan_session_id++;
-        tunnel.instance = 0;
-        tunnel.outer_table_id = 0;
-
-        int ret = vpp_gre_tunnel_add_del(&tunnel, true, &tunnel.instance);
-        if(ret != 0) {
-            SWSS_LOG_ERROR("Failed to add GRE tunnel for ERSPAN session, ret=%d", ret);
-            return SAI_STATUS_FAILURE;
-        }
-
-        info.sw_if_index = tunnel.instance;
-        info.is_erspan = true;
-        info.src_ip = tunnel.src;
-        info.dst_ip = tunnel.dst;
-        info.session_id = tunnel.session_id;
     } else {
         SWSS_LOG_ERROR("Unsupported mirror session type %d", mirror_type);
         return SAI_STATUS_FAILURE;
@@ -98,23 +72,6 @@ sai_status_t SwitchVpp::removeMirrorSession(
     }
 
     MirrorSessionInfo &info = it->second;
-
-    if(info.is_erspan) {
-        vpp_gre_tunnel_t tunnel{};
-        tunnel.instance = info.sw_if_index;
-        tunnel.type = 2;
-        tunnel.src = info.src_ip;
-        tunnel.dst = info.dst_ip;
-        tunnel.session_id = info.session_id;
-        tunnel.outer_table_id = 0;
-
-        uint32_t sw_if_index = 0;
-        int ret = vpp_gre_tunnel_add_del(&tunnel, false, &sw_if_index);
-        if(ret != 0) {
-            SWSS_LOG_ERROR("Failed to remove GRE tunnel for ERSPAN session, ret=%d", ret);
-            return SAI_STATUS_FAILURE;
-        }
-    }
 
     CHECK_STATUS(remove_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sai_serialize_object_id(object_id)));
 

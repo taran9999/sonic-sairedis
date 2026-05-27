@@ -334,18 +334,6 @@ extern int vpp_span_enable_disable(uint32_t sw_if_index_from,
                                    uint32_t sw_if_index_to, 
                                    uint8_t state, /* 0 = disable */
                                    bool is_l2);
-
-/* GRE tunnel for ERSPAN */
-typedef struct _vpp_gre_tunnel {
-    vpp_ip_addr_t src;
-    vpp_ip_addr_t dst;
-    uint8_t type;           /* 0 = L3, 1 = TEB, 2 = ERSPAN */
-    uint16_t session_id;    /* ERSPAN session ID (0 - 1023) */
-    uint32_t instance;
-    uint32_t outer_table_id;
-} vpp_gre_tunnel_t;
-
-extern int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, uint32_t *sw_if_index);
 #ifdef __cplusplus
 }
 #endif
