@@ -71,8 +71,6 @@ sai_status_t SwitchVpp::removeMirrorSession(
         return SAI_STATUS_ITEM_NOT_FOUND;
     }
 
-    MirrorSessionInfo &info = it->second;
-
     CHECK_STATUS(remove_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sai_serialize_object_id(object_id)));
 
     m_mirror_sessions.erase(it);
