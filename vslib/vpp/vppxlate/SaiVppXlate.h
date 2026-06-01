@@ -58,6 +58,7 @@ extern "C" {
         VPP_ACL_ACTION_API_DENY = 0,
         VPP_ACL_ACTION_API_PERMIT = 1,
         VPP_ACL_ACTION_API_PERMIT_STFULL = 2,
+        VPP_ACL_ACTION_PERMIT_MIRROR = 3,
     } vpp_acl_action_e;
 
     typedef struct  _vpp_acl_rule {
@@ -73,6 +74,7 @@ extern "C" {
         uint16_t dstport_or_icmpcode_last;
         uint8_t tcp_flags_mask;
         uint8_t tcp_flags_value;
+        uint32_t mirror_sw_if_index;
     } vpp_acl_rule_t;
 
     typedef struct _vpp_acl_ {
