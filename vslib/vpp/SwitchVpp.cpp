@@ -1423,7 +1423,7 @@ sai_status_t SwitchVpp::setPort(
             // to each direction).
             PortMirrorBinding& pmb = m_port_mirror_bindings[portId];
 
-            auto recompute_and_program = [&]() {
+            auto recompute_and_program = [&]() -> sai_status_t {
                 // The VPP SPAN API requires a single destination sw_if_index.
                 // If both directions are bound and they point at different
                 // destinations, we cannot represent that with one SPAN entry.
