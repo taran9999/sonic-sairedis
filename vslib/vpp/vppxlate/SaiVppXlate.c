@@ -2358,6 +2358,23 @@ int vpp_acl_add_replace (vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace
         vpp_rule->tcp_flags_value = in_rule->tcp_flags_value;
         vpp_rule->is_permit = (vl_api_acl_action_t)in_rule->action;
 
+#ifdef HAVE_VPP_ACL_MIRROR
+        /*
+         * Mirror destination interface (Everflow). When the action is not
+         * PERMIT_MIRROR we send the sentinel ~0 so the plugin treats the rule
+         * as a non-mirror rule even if the caller left the field zeroed.
+         *
+         * This is gated by HAVE_VPP_ACL_MIRROR because vl_api_acl_rule_t only
+         * gains the mirror_sw_if_index field after the VPP ACL plugin patch
+         * (see HLD vpp-mirror.md §11) is applied and the API headers are
+         * regenerated. Without the patch this line will not compile.
+         */
+        vpp_rule->mirror_sw_if_index =
+            (in_rule->action == VPP_ACL_ACTION_PERMIT_MIRROR)
+                ? htonl(in_rule->mirror_sw_if_index)
+                : htonl((uint32_t)~0);
+#endif
+
         SAIVPP_INFO("VPP Rule %u: proto: %u, "
                      "srcport/icmptype: %u-%u, dstport/icmpcode: %u-%u, "
                      "tcp_flags: mask=0x%x, value=0x%x, action: %s",

@@ -51,25 +51,38 @@ sai_status_t SwitchVpp::createMirrorSession(
         CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, &value, &attr_index));
         sai_ip_address_t dst_ip = value->ipaddr;
 
+        int session_id = m_erspan_session_id_pool.alloc();
+        if (session_id < 0) {
+            SWSS_LOG_ERROR("ERSPAN session id pool exhausted (max 1024 in-flight sessions)");
+            return SAI_STATUS_INSUFFICIENT_RESOURCES;
+        }
+
         vpp_gre_tunnel_t tunnel{};
         sai_ip_address_t_to_vpp_ip_addr_t(src_ip, tunnel.src);
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
         tunnel.type = 2;
-        tunnel.session_id = m_next_erspan_session_id++;
+        tunnel.session_id = (uint16_t)session_id;
         tunnel.instance = 0;
         tunnel.outer_table_id = 0;
 
-        int ret = vpp_gre_tunnel_add_del(&tunnel, true, &tunnel.instance);
+        // Snapshot the requested instance before the call. vpp_gre_tunnel_add_del
+        // overwrites the out-parameter with the returned sw_if_index; we must
+        // keep the original `instance` value to identify the tunnel on delete.
+        uint32_t gre_instance = tunnel.instance;
+        uint32_t gre_sw_if_index = 0;
+        int ret = vpp_gre_tunnel_add_del(&tunnel, true, &gre_sw_if_index);
         if(ret != 0) {
             SWSS_LOG_ERROR("Failed to add GRE tunnel for ERSPAN session, ret=%d", ret);
+            m_erspan_session_id_pool.free((uint32_t)session_id);
             return SAI_STATUS_FAILURE;
         }
 
-        info.sw_if_index = tunnel.instance;
+        info.sw_if_index = gre_sw_if_index;
         info.is_erspan = true;
         info.src_ip = tunnel.src;
         info.dst_ip = tunnel.dst;
-        info.session_id = tunnel.session_id;
+        info.session_id = (uint16_t)session_id;
+        info.gre_instance = gre_instance;
     } else {
         SWSS_LOG_ERROR("Unsupported mirror session type %d", mirror_type);
         return SAI_STATUS_FAILURE;
@@ -101,7 +114,10 @@ sai_status_t SwitchVpp::removeMirrorSession(
 
     if(info.is_erspan) {
         vpp_gre_tunnel_t tunnel{};
-        tunnel.instance = info.sw_if_index;
+        // VPP keys GRE tunnel delete on the original `instance` (the value the
+        // caller supplied on create), NOT on the returned sw_if_index. Using
+        // sw_if_index here would silently no-op (or remove the wrong tunnel).
+        tunnel.instance = info.gre_instance;
         tunnel.type = 2;
         tunnel.src = info.src_ip;
         tunnel.dst = info.dst_ip;
@@ -114,6 +130,10 @@ sai_status_t SwitchVpp::removeMirrorSession(
             SWSS_LOG_ERROR("Failed to remove GRE tunnel for ERSPAN session, ret=%d", ret);
             return SAI_STATUS_FAILURE;
         }
+
+        // Recycle the ERSPAN session id only after VPP confirmed the tunnel
+        // is gone, so a re-allocation cannot collide with a still-live tunnel.
+        m_erspan_session_id_pool.free((uint32_t)info.session_id);
     }
 
     CHECK_STATUS(remove_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sai_serialize_object_id(object_id)));

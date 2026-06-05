@@ -835,6 +835,17 @@ namespace saivs
                     _In_ vpp_tunterm_acl_rule_t *rule);
 
             /**
+             * @brief Updates an ACE field for a regular VPP ACL rule.
+             *
+             * Member function so it can resolve mirror-session OIDs against
+             * m_mirror_sessions for SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_{INGRESS,EGRESS}.
+             */
+            sai_status_t acl_rule_field_update(
+                    _In_ sai_acl_entry_attr_t attr_id,
+                    _In_ const sai_attribute_value_t *value,
+                    _Out_ vpp_acl_rule_t *rule);
+
+            /**
              * @brief Binds or unbinds a tunnel termination ACL table to/from an interface.
              *
              * @param[in] tbl_oid The object ID of the ACL table to be bound or unbound.
@@ -1013,23 +1024,30 @@ namespace saivs
         private: // VPP mirror
             constexpr static const int m_maxMirrorSessions = 10;
             uint32_t m_mirror_session_count = 0;
-            uint16_t m_next_erspan_session_id = 1;
+
+            // ERSPAN session-id pool (10-bit field => 0..1023). Allocate on
+            // mirror-session create, free on remove so long-running sessions of
+            // add/remove churn cannot exhaust the space.
+            BitResourcePool m_erspan_session_id_pool{1024, 0};
 
             struct MirrorSessionInfo {
-                uint32_t sw_if_index;
+                uint32_t sw_if_index;       // SPAN: monitor port; ERSPAN: GRE tunnel sw_if_index
                 bool is_erspan;
                 vpp_ip_addr_t src_ip;
                 vpp_ip_addr_t dst_ip;
-                uint16_t session_id;
+                uint16_t session_id;        // ERSPAN session id (10-bit)
+                uint32_t gre_instance;      // VPP GRE tunnel instance used on create; required for delete
             };
 
             std::map<sai_object_id_t, MirrorSessionInfo> m_mirror_sessions;
 
             struct PortMirrorBinding {
-                sai_object_id_t session_oid;
-                bool rx;
-                bool tx;
-                uint32_t dst_sw_if_idx;
+                // Per-direction binding: a port may have RX bound to one session
+                // and TX bound to a different session (orchagent does honor that).
+                sai_object_id_t rx_session_oid = SAI_NULL_OBJECT_ID;
+                sai_object_id_t tx_session_oid = SAI_NULL_OBJECT_ID;
+                uint32_t rx_dst_sw_if_idx = (uint32_t)~0;
+                uint32_t tx_dst_sw_if_idx = (uint32_t)~0;
             };
 
             // port id to PortMirrorBinding

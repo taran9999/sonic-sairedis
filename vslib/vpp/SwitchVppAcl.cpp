@@ -365,7 +365,7 @@ static void acl_rule_set_action(
         }
 }
 
-sai_status_t acl_rule_field_update(
+sai_status_t SwitchVpp::acl_rule_field_update(
     _In_ sai_acl_entry_attr_t          attr_id,
     _In_ const sai_attribute_value_t  *value,
     _Out_ vpp_acl_rule_t      *rule)
@@ -461,7 +461,34 @@ sai_status_t acl_rule_field_update(
         break;
 
     case SAI_ACL_ENTRY_ATTR_ACTION_PACKET_ACTION:
-        acl_rule_set_action(value, rule);
+        // MIRROR action is sticky: if a prior MIRROR_INGRESS/EGRESS already set the
+        // rule to PERMIT_MIRROR, do not let PACKET_ACTION clobber it (attribute order
+        // is not guaranteed). The mirror-action path forwards the original packet
+        // regardless, so the combination behaves as "forward + clone".
+        if (rule->action != VPP_ACL_ACTION_PERMIT_MIRROR) {
+            acl_rule_set_action(value, rule);
+        }
+        break;
+
+    case SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_INGRESS:
+    case SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_EGRESS:
+        if (value->aclaction.enable) {
+            // SAI defines MIRROR_INGRESS/EGRESS as sai_object_list_t. We honor the
+            // first session OID only (HLD restriction).
+            const auto &objlist = value->aclaction.parameter.objlist;
+            if (objlist.count == 0 || objlist.list == NULL) {
+                SWSS_LOG_ERROR("Mirror action objlist is empty");
+                return SAI_STATUS_INVALID_PARAMETER;
+            }
+            sai_object_id_t oid = objlist.list[0];
+            auto it = m_mirror_sessions.find(oid);
+            if (it == m_mirror_sessions.end()) {
+                SWSS_LOG_ERROR("Mirror session %s not found for ACL mirror action", sai_serialize_object_id(oid).c_str());
+                return SAI_STATUS_FAILURE;
+            }
+            rule->action = VPP_ACL_ACTION_PERMIT_MIRROR;
+            rule->mirror_sw_if_index = it->second.sw_if_index;
+        }
         break;
 
     case SAI_ACL_ENTRY_ATTR_PRIORITY:
@@ -860,6 +887,9 @@ sai_status_t SwitchVpp::fill_acl_rules(
         } else {
             // Process regular ACL rule(s)
             vpp_acl_rule_t rule = {};
+            // Default mirror destination to the "no mirror" sentinel so a
+            // non-mirror rule never accidentally clones to interface 0.
+            rule.mirror_sw_if_index = (uint32_t)~0;
             uint8_t port_proto = 0;  // Track if port-related fields were set
 
             // Record the base index for this ACE
@@ -1355,6 +1385,7 @@ sai_status_t SwitchVpp::emptyAclCreate(
     rule->dst_prefix.addr.ip4.sin_addr.s_addr = 0;  // 0.0.0.0
     rule->dst_prefix_mask.addr.ip4.sin_addr.s_addr = 0xFFFFFFFF;  // 255.255.255.255
     rule->action = VPP_ACL_ACTION_API_PERMIT;
+    rule->mirror_sw_if_index = (uint32_t)~0;
 
     sai_status_t status;
 
@@ -1404,11 +1435,13 @@ sai_status_t SwitchVpp::aclDefaultCreate()
 
     acl_rule_field_update((sai_acl_entry_attr_t) attr[0].id, &attr[0].value, rule);
     rule->action = VPP_ACL_ACTION_API_PERMIT;
+    rule->mirror_sw_if_index = (uint32_t)~0;
 
     rule = &acl->rules[1];
 
     acl_rule_field_update((sai_acl_entry_attr_t) attr[1].id, &attr[1].value, rule);
     rule->action = VPP_ACL_ACTION_API_PERMIT;
+    rule->mirror_sw_if_index = (uint32_t)~0;
 
     sai_status_t status;
 
