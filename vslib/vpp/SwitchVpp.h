@@ -1024,7 +1024,7 @@ namespace saivs
         private: // VPP mirror
             constexpr static const int m_maxMirrorSessions = 10;
             uint32_t m_mirror_session_count = 0;
-            
+
             BitResourcePool m_erspan_session_id_pool{1024, 0};
             uint16_t m_next_erspan_session_id = 1;
 
@@ -1034,6 +1034,7 @@ namespace saivs
                 vpp_ip_addr_t src_ip;
                 vpp_ip_addr_t dst_ip;
                 uint16_t session_id;
+                uint32_t gre_instance; // GRE tunnel instance for erspan
             };
 
             std::map<sai_object_id_t, MirrorSessionInfo> m_mirror_sessions;
