@@ -1410,94 +1410,57 @@ sai_status_t SwitchVpp::setPort(
     if(attr->id == SAI_PORT_ATTR_INGRESS_MIRROR_SESSION ||
        attr->id == SAI_PORT_ATTR_EGRESS_MIRROR_SESSION)
     {
-        const bool is_ingress = (attr->id == SAI_PORT_ATTR_INGRESS_MIRROR_SESSION);
-
         std::string src_hwif;
         if(!vpp_get_hwif_name(portId, 0, src_hwif)) {
             SWSS_LOG_WARN("Failed to get hwif name for port %s; skipping VPP SPAN programming", sid.c_str());
         } else {
             uint32_t src_sw_if = get_sw_if_idx(src_hwif.c_str());
 
-            // Ensure a binding record exists for this port; this lets us track
-            // RX and TX independently (orchagent can bind different sessions
-            // to each direction).
-            PortMirrorBinding& pmb = m_port_mirror_bindings[portId];
-
-            auto recompute_and_program = [&]() -> sai_status_t {
-                // The VPP SPAN API requires a single destination sw_if_index.
-                // If both directions are bound and they point at different
-                // destinations, we cannot represent that with one SPAN entry.
-                bool rx = (pmb.rx_session_oid != SAI_NULL_OBJECT_ID);
-                bool tx = (pmb.tx_session_oid != SAI_NULL_OBJECT_ID);
-
-                if (!rx && !tx) {
-                    // Fully unbound: disable SPAN. VPP only needs the source
-                    // sw_if_index for disable; pass any valid value for the
-                    // destination (we use the last-known one or 0).
-                    uint32_t dst = (pmb.rx_dst_sw_if_idx != (uint32_t)~0)
-                                       ? pmb.rx_dst_sw_if_idx
-                                       : (pmb.tx_dst_sw_if_idx != (uint32_t)~0
-                                              ? pmb.tx_dst_sw_if_idx
-                                              : 0);
-                    SWSS_LOG_INFO("VPP span disable: src_sw_if=%u (%s) dst_sw_if=%u",
-                                  src_sw_if, src_hwif.c_str(), dst);
-                    vpp_span_enable_disable(src_sw_if, dst, 0, false);
-                    m_port_mirror_bindings.erase(portId);
-                    return SAI_STATUS_SUCCESS;
-                }
-
-                if (rx && tx && pmb.rx_dst_sw_if_idx != pmb.tx_dst_sw_if_idx) {
-                    SWSS_LOG_ERROR("Port %s has RX and TX mirror bound to different destinations "
-                                   "(rx_dst=%u tx_dst=%u); single VPP SPAN entry cannot represent this",
-                                   sid.c_str(), pmb.rx_dst_sw_if_idx, pmb.tx_dst_sw_if_idx);
-                    return SAI_STATUS_NOT_SUPPORTED;
-                }
-
-                uint32_t dst = rx ? pmb.rx_dst_sw_if_idx : pmb.tx_dst_sw_if_idx;
-                uint8_t  state = (uint8_t)((rx ? 1 : 0) | (tx ? 2 : 0));
-
-                SWSS_LOG_INFO("VPP span enable: src_sw_if=%u (%s) dst_sw_if=%u state=%u",
-                              src_sw_if, src_hwif.c_str(), dst, state);
-                vpp_span_enable_disable(src_sw_if, dst, state, false);
-                return SAI_STATUS_SUCCESS;
-            };
-
             if(attr->value.objlist.count > 0) {
-                // bind: only the first session in the list is honored
+                // bind
                 sai_object_id_t session_oid = attr->value.objlist.list[0];
                 auto it = m_mirror_sessions.find(session_oid);
                 if(it == m_mirror_sessions.end()) {
                     SWSS_LOG_WARN("Mirror session %s not found for port %s; skipping VPP SPAN programming",
                         sai_serialize_object_id(session_oid).c_str(), sid.c_str());
                 } else {
-                    if (is_ingress) {
-                        pmb.rx_session_oid    = session_oid;
-                        pmb.rx_dst_sw_if_idx  = it->second.sw_if_index;
-                    } else {
-                        pmb.tx_session_oid    = session_oid;
-                        pmb.tx_dst_sw_if_idx  = it->second.sw_if_index;
+                    auto pmb_it = m_port_mirror_bindings.find(portId);
+                    if(pmb_it == m_port_mirror_bindings.end()) {
+                        PortMirrorBinding new_pmb{};
+                        new_pmb.session_oid = session_oid;
+                        new_pmb.rx = false;
+                        new_pmb.tx = false;
+                        new_pmb.dst_sw_if_idx = it->second.sw_if_index;
+                        pmb_it = m_port_mirror_bindings.emplace(portId, new_pmb).first;
                     }
+                    PortMirrorBinding& pmb = pmb_it->second;
 
-                    sai_status_t st = recompute_and_program();
-                    if (st != SAI_STATUS_SUCCESS) {
-                        return st;
+                    if(pmb.dst_sw_if_idx != it->second.sw_if_index) {
+                        SWSS_LOG_WARN("Mirror session dst_sw_if_index mismatch for port %s: pmb=%u, ms=%u; skipping VPP SPAN programming",
+                            sid.c_str(), pmb.dst_sw_if_idx, it->second.sw_if_index);
+                        return SAI_STATUS_FAILURE;
                     }
+                    
+                    (attr->id == SAI_PORT_ATTR_INGRESS_MIRROR_SESSION) ? pmb.rx = true : pmb.tx = true;
+
+                    // 1 = RX, 2 = TX, 3 = both
+                    uint8_t state = (pmb.rx ? 1 : 0) | (pmb.tx ? 2 : 0);
+
+                    SWSS_LOG_INFO("Port mirror binding info for port %s: session_oid=%s, rx=%d, tx=%d, dst_sw_if_idx=%u", sid.c_str(), sai_serialize_object_id(session_oid).c_str(), pmb.rx, pmb.tx, pmb.dst_sw_if_idx);
+                    SWSS_LOG_INFO("VPP span enable: src_sw_if=%u, src_hwif_name=%s, dst_sw_if=%u, state=%u", src_sw_if, src_hwif.c_str(), it->second.sw_if_index, state);
+                    vpp_span_enable_disable(src_sw_if, it->second.sw_if_index, state, false);
                 }
             } else {
-                // unbind: clear only the direction being unbound; only disable
-                // SPAN when both directions are now unbound.
-                if (is_ingress) {
-                    pmb.rx_session_oid   = SAI_NULL_OBJECT_ID;
-                    pmb.rx_dst_sw_if_idx = (uint32_t)~0;
+                auto pmb_it = m_port_mirror_bindings.find(portId);
+                if(pmb_it == m_port_mirror_bindings.end()) {
+                    SWSS_LOG_WARN("No existing mirror session binding found for port %s; skipping VPP SPAN unprogramming", sid.c_str());
                 } else {
-                    pmb.tx_session_oid   = SAI_NULL_OBJECT_ID;
-                    pmb.tx_dst_sw_if_idx = (uint32_t)~0;
+                    m_port_mirror_bindings.erase(pmb_it);
                 }
 
-                sai_status_t st = recompute_and_program();
-                if (st != SAI_STATUS_SUCCESS) {
-                    return st;
-                }
+                // unbind: state = 0
+                SWSS_LOG_INFO("VPP span disable: src_sw_if=%u, src_hwif_name=%s", src_sw_if, src_hwif.c_str());
+                vpp_span_enable_disable(src_sw_if, ~0, 0, false);
             }
         }
     }
