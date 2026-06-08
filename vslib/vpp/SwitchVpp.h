@@ -1024,6 +1024,8 @@ namespace saivs
         private: // VPP mirror
             constexpr static const int m_maxMirrorSessions = 10;
             uint32_t m_mirror_session_count = 0;
+            
+            BitResourcePool m_erspan_session_id_pool{1024, 0};
             uint16_t m_next_erspan_session_id = 1;
 
             struct MirrorSessionInfo {
