@@ -768,6 +768,42 @@ sai_status_t SwitchVpp::get_sorted_aces(
             status = SAI_STATUS_FAILURE;
             break;
         }
+
+        /*
+         * get_max() relies on transfer_list() to copy list-type attribute
+         * values. When the destination attribute is zero-initialised
+         * (calloc), transfer_list() copies the source count but leaves
+         * dst.list = NULL (see meta/SaiSerialize.cpp). For MIRROR_INGRESS /
+         * MIRROR_EGRESS that leaves us with objlist.count > 0 but list ==
+         * NULL, which downstream is (correctly) rejected as "objlist is
+         * empty". Re-fetch those attributes with a pre-allocated backing
+         * buffer so the OID(s) actually land in our struct.
+         */
+        for (uint32_t i = 0; i < p_ace->attrs_count; i++) {
+            sai_attribute_t *attr = &p_ace->attrs[i];
+            sai_object_id_t *buf = NULL;
+
+            if (attr->id == SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_INGRESS) {
+                buf = p_ace->mirror_ingress_objid_list;
+            } else if (attr->id == SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_EGRESS) {
+                buf = p_ace->mirror_egress_objid_list;
+            } else {
+                continue;
+            }
+
+            attr->value.aclaction.parameter.objlist.list = buf;
+            attr->value.aclaction.parameter.objlist.count = MAX_ACL_MIRROR_OIDS;
+
+            sai_status_t st = get(SAI_OBJECT_TYPE_ACL_ENTRY, sid, 1, attr);
+            if (st != SAI_STATUS_SUCCESS) {
+                SWSS_LOG_WARN("Failed to re-fetch mirror action attr %d for %s: %s",
+                              attr->id, sid.c_str(),
+                              sai_serialize_status(st).c_str());
+                attr->value.aclaction.parameter.objlist.list = NULL;
+                attr->value.aclaction.parameter.objlist.count = 0;
+            }
+        }
+
         p_ace->attr_range.value.aclfield.data.objlist.list = p_ace->range_objid_list;
         p_ace->attr_range.value.aclfield.data.objlist.count = 2;
 
