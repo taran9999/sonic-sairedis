@@ -62,12 +62,11 @@ sai_status_t SwitchVpp::createMirrorSession(
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
         tunnel.type = 2;
         tunnel.session_id = (uint16_t)session_id;
-        tunnel.instance = 0;
+        
+        // Let VPP auto-allocate the GRE tunnel instance (~0)
+        tunnel.instance = (uint32_t)~0;
         tunnel.outer_table_id = 0;
 
-        // Snapshot the requested instance before the call. vpp_gre_tunnel_add_del
-        // overwrites the out-parameter with the returned sw_if_index; we must
-        // keep the original `instance` value to identify the tunnel on delete.
         uint32_t gre_instance = tunnel.instance;
         uint32_t gre_sw_if_index = 0;
         int ret = vpp_gre_tunnel_add_del(&tunnel, true, &gre_sw_if_index);
@@ -114,9 +113,10 @@ sai_status_t SwitchVpp::removeMirrorSession(
 
     if(info.is_erspan) {
         vpp_gre_tunnel_t tunnel{};
-        // VPP keys GRE tunnel delete on the original `instance` (the value the
-        // caller supplied on create), NOT on the returned sw_if_index. Using
-        // sw_if_index here would silently no-op (or remove the wrong tunnel).
+        // VPP locates the GRE tunnel to delete by its key (src, dst, fib, type,
+        // session_id), not by instance or sw_if_index. We still pass the stored
+        // instance for completeness, but the (src, dst, session_id) tuple is what
+        // identifies the tunnel.
         tunnel.instance = info.gre_instance;
         tunnel.type = 2;
         tunnel.src = info.src_ip;

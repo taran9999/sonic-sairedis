@@ -2357,6 +2357,7 @@ int vpp_acl_add_replace (vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace
         vpp_rule->tcp_flags_mask = in_rule->tcp_flags_mask;
         vpp_rule->tcp_flags_value = in_rule->tcp_flags_value;
         vpp_rule->is_permit = (vl_api_acl_action_t)in_rule->action;
+        vpp_rule->mirror_sw_if_index = htonl(in_rule->mirror_sw_if_index);
  
 
         SAIVPP_INFO("VPP Rule %u: proto: %u, "
