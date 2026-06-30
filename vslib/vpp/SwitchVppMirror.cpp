@@ -52,10 +52,16 @@ sai_status_t SwitchVpp::createMirrorSession(
         CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, &value, &attr_index));
         sai_ip_address_t dst_ip = value->ipaddr;
 
-        // GRE protocol/ethertype to emit in the encap header (e.g. 0x88BE for
-        // SONiC Everflow). Mandatory on create for ENHANCED_REMOTE.
-        CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE, &value, &attr_index));
-        uint16_t gre_protocol = value->u16;
+        // GRE protocol/ethertype to emit in the encap header. Although SAI marks
+        // this MANDATORY_ON_CREATE, orchagent may program it via a later SET, so
+        // do NOT hard-fail session creation when it is absent: default to the
+        // SONiC Everflow value (0x88BE) instead. Hard-failing here would leave
+        // the mirror session non-existent and break every ACL rule that refers
+        // to it.
+        uint16_t gre_protocol = 0x88BE;
+        if (find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE, &value, &attr_index) == SAI_STATUS_SUCCESS) {
+            gre_protocol = value->u16;
+        }
 
         // Outer tunnel header TTL. Optional (SAI default 255).
         uint8_t session_ttl = 255;
@@ -97,12 +103,15 @@ sai_status_t SwitchVpp::createMirrorSession(
 
         uint32_t gre_instance = tunnel.instance;
         uint32_t gre_sw_if_index = 0;
+        SWSS_LOG_NOTICE("Creating GRE mirror tunnel: type=%u session_id=%d instance=%u gre_protocol=0x%04x ttl=%u(session_ttl=%u)",
+            tunnel.type, session_id, tunnel.instance, gre_protocol, tunnel.ttl, session_ttl);
         int ret = vpp_gre_tunnel_add_del(&tunnel, true, &gre_sw_if_index);
         if(ret != 0) {
             SWSS_LOG_ERROR("Failed to add GRE tunnel for ERSPAN session, ret=%d", ret);
             m_erspan_session_id_pool.free((uint32_t)session_id);
             return SAI_STATUS_FAILURE;
         }
+        SWSS_LOG_NOTICE("GRE mirror tunnel created: session_id=%d sw_if_index=%u", session_id, gre_sw_if_index);
 
         refresh_interfaces_list();
 
