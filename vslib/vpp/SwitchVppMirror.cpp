@@ -3,6 +3,7 @@
 
 #include "meta/sai_serialize.h"
 #include "swss/logger.h"
+#include "vppxlate/SaiVppXlate.h"
 
 using namespace saivs;
 
@@ -62,9 +63,9 @@ sai_status_t SwitchVpp::createMirrorSession(
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
         tunnel.type = 2;
         tunnel.session_id = (uint16_t)session_id;
-        
-        // Let VPP auto-allocate the GRE tunnel instance (~0)
-        tunnel.instance = (uint32_t)~0;
+
+        // derive tunnel instance from session id
+        tunnel.instance = (uint32_t)session_id;
         tunnel.outer_table_id = 0;
 
         uint32_t gre_instance = tunnel.instance;
@@ -72,6 +73,18 @@ sai_status_t SwitchVpp::createMirrorSession(
         int ret = vpp_gre_tunnel_add_del(&tunnel, true, &gre_sw_if_index);
         if(ret != 0) {
             SWSS_LOG_ERROR("Failed to add GRE tunnel for ERSPAN session, ret=%d", ret);
+            m_erspan_session_id_pool.free((uint32_t)session_id);
+            return SAI_STATUS_FAILURE;
+        }
+
+        refresh_interfaces_list();
+
+        std::string gre_ifname = "gre" + std::to_string(gre_instance);
+        SWSS_LOG_INFO("gre tunnel created with ifname %s", gre_ifname.c_str());
+        int up_ret = interface_set_state(gre_ifname.c_str(), true);
+        if(up_ret != 0) {
+            SWSS_LOG_ERROR("Failed to bring up gre tunnel %s, ret=%d", gre_ifname.c_str(), up_ret);
+            vpp_gre_tunnel_add_del(&tunnel, false, &gre_sw_if_index);
             m_erspan_session_id_pool.free((uint32_t)session_id);
             return SAI_STATUS_FAILURE;
         }
