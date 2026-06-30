@@ -4154,6 +4154,8 @@ int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_ind
     mp->tunnel.session_id = htons(tunnel->session_id);
     mp->tunnel.instance = htonl(tunnel->instance);
     mp->tunnel.outer_table_id = htonl(tunnel->outer_table_id);
+    mp->tunnel.gre_protocol = htons(tunnel->gre_protocol);
+    mp->tunnel.hop_limit = tunnel->ttl;
 
     api_addr = &mp->tunnel.src;
     addr = &tunnel->src;
@@ -4189,7 +4191,7 @@ int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_ind
     WR (ret);
 
     *sw_if_index = vam->sw_if_index;
-    SAIVPP_INFO("gre_add_del: is_add=%d type=%u session_id=%u instance=%u if_index=%d ret=%d", is_add, tunnel->type, tunnel->session_id, tunnel->instance, vam->sw_if_index, ret);
+    SAIVPP_INFO("gre_add_del: is_add=%d type=%u session_id=%u instance=%u gre_protocol=0x%04x ttl=%u if_index=%d ret=%d", is_add, tunnel->type, tunnel->session_id, tunnel->instance, tunnel->gre_protocol, tunnel->ttl, vam->sw_if_index, ret);
 
     VPP_UNLOCK();
     return ret;

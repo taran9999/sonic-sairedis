@@ -345,6 +345,8 @@ typedef struct _vpp_gre_tunnel {
     uint16_t session_id;    /* ERSPAN session ID (0 - 1023) */
     uint32_t instance;
     uint32_t outer_table_id;
+    uint16_t gre_protocol;  /* GRE protocol/ethertype override, 0 = derive from type */
+    uint8_t ttl;            /* Outer IP TTL / hop-limit, 0 = VPP default */
 } vpp_gre_tunnel_t;
 
 extern int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, uint32_t *sw_if_index);
