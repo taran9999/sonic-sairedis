@@ -52,6 +52,17 @@ sai_status_t SwitchVpp::createMirrorSession(
         CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_IP_ADDRESS, &value, &attr_index));
         sai_ip_address_t dst_ip = value->ipaddr;
 
+        // GRE protocol/ethertype to emit in the encap header (e.g. 0x88BE for
+        // SONiC Everflow). Mandatory on create for ENHANCED_REMOTE.
+        CHECK_STATUS(find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_GRE_PROTOCOL_TYPE, &value, &attr_index));
+        uint16_t gre_protocol = value->u16;
+
+        // Outer tunnel header TTL. Optional (SAI default 255).
+        uint8_t session_ttl = 255;
+        if (find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_TTL, &value, &attr_index) == SAI_STATUS_SUCCESS) {
+            session_ttl = value->u8;
+        }
+
         int session_id = m_erspan_session_id_pool.alloc();
         if (session_id < 0) {
             SWSS_LOG_ERROR("ERSPAN session id pool exhausted (max 1024 in-flight sessions)");
@@ -61,8 +72,24 @@ sai_status_t SwitchVpp::createMirrorSession(
         vpp_gre_tunnel_t tunnel{};
         sai_ip_address_t_to_vpp_ip_addr_t(src_ip, tunnel.src);
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
-        tunnel.type = 2;
+        // Use a TEB (type 1) GRE tunnel rather than ERSPAN (type 2): SONiC
+        // "ERSPAN" is plain GRE with a configured protocol and NO GRE sequence
+        // number and NO ERSPAN type-II shim. TEB shares the same (working)
+        // L2 encap/delivery path as ERSPAN but emits flags=0 with no shim.
+        // The gre_protocol override makes it carry the configured ethertype
+        // (e.g. 0x88BE) instead of the TEB default 0x6558.
+        tunnel.type = 1;
         tunnel.session_id = (uint16_t)session_id;
+        tunnel.gre_protocol = gre_protocol;
+        // VPP forwards the GRE-encapped packet to the tunnel destination through
+        // one more IP rewrite, which decrements the outer TTL once. Compensate
+        // by adding one so the packet on the wire carries exactly the
+        // session-configured TTL.
+        if (session_ttl > 0 && session_ttl < 255) {
+            tunnel.ttl = (uint8_t)(session_ttl + 1);
+        } else {
+            tunnel.ttl = session_ttl;
+        }
 
         // derive tunnel instance from session id
         tunnel.instance = (uint32_t)session_id;
@@ -128,10 +155,10 @@ sai_status_t SwitchVpp::removeMirrorSession(
         vpp_gre_tunnel_t tunnel{};
         // VPP locates the GRE tunnel to delete by its key (src, dst, fib, type,
         // session_id), not by instance or sw_if_index. We still pass the stored
-        // instance for completeness, but the (src, dst, session_id) tuple is what
-        // identifies the tunnel.
+        // instance for completeness, but the (src, dst, type, session_id) tuple
+        // is what identifies the tunnel. type must match creation (TEB = 1).
         tunnel.instance = info.gre_instance;
-        tunnel.type = 2;
+        tunnel.type = 1;
         tunnel.src = info.src_ip;
         tunnel.dst = info.dst_ip;
         tunnel.session_id = info.session_id;
