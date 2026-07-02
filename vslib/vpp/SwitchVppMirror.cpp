@@ -78,13 +78,15 @@ sai_status_t SwitchVpp::createMirrorSession(
         vpp_gre_tunnel_t tunnel{};
         sai_ip_address_t_to_vpp_ip_addr_t(src_ip, tunnel.src);
         sai_ip_address_t_to_vpp_ip_addr_t(dst_ip, tunnel.dst);
-        // Use a TEB (type 1) GRE tunnel rather than ERSPAN (type 2): SONiC
-        // "ERSPAN" is plain GRE with a configured protocol and NO GRE sequence
-        // number and NO ERSPAN type-II shim. TEB shares the same (working)
-        // L2 encap/delivery path as ERSPAN but emits flags=0 with no shim.
-        // The gre_protocol override makes it carry the configured ethertype
-        // (e.g. 0x88BE) instead of the TEB default 0x6558.
-        tunnel.type = 1;
+        // Use an ERSPAN (type 2) GRE tunnel: it is the only VPP GRE tunnel type
+        // whose L2 clone/delivery path actually forwards the ACL-injected
+        // mirror copy. SONiC "ERSPAN" is really plain GRE with a configured
+        // protocol and NO GRE sequence number and NO ERSPAN type-II shim.
+        // Setting tunnel.gre_protocol signals the (patched) VPP GRE plugin to
+        // emit that protocol with flags=0 and to suppress the type-II shim,
+        // while keeping the ERSPAN tunnel's working delivery path. VPP's stock
+        // ERSPAN GRE protocol is already 0x88BE, matching SONiC Everflow.
+        tunnel.type = 2;
         tunnel.session_id = (uint16_t)session_id;
         tunnel.gre_protocol = gre_protocol;
         // VPP forwards the GRE-encapped packet to the tunnel destination through
@@ -165,9 +167,9 @@ sai_status_t SwitchVpp::removeMirrorSession(
         // VPP locates the GRE tunnel to delete by its key (src, dst, fib, type,
         // session_id), not by instance or sw_if_index. We still pass the stored
         // instance for completeness, but the (src, dst, type, session_id) tuple
-        // is what identifies the tunnel. type must match creation (TEB = 1).
+        // is what identifies the tunnel. type must match creation (ERSPAN = 2).
         tunnel.instance = info.gre_instance;
-        tunnel.type = 1;
+        tunnel.type = 2;
         tunnel.src = info.src_ip;
         tunnel.dst = info.dst_ip;
         tunnel.session_id = info.session_id;
