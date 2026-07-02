@@ -365,6 +365,40 @@ static void acl_rule_set_action(
         }
 }
 
+sai_status_t SwitchVpp::acl_rule_add_in_port(
+    _In_ sai_object_id_t port_oid,
+    _Out_ vpp_acl_rule_t *rule)
+{
+    SWSS_LOG_ENTER();
+
+    std::string hwif_name;
+    if (!vpp_get_hwif_name(port_oid, 0, hwif_name)) {
+        SWSS_LOG_ERROR("IN_PORTS: hwif name not found for port %s; ingress-port match will be incomplete",
+                       sai_serialize_object_id(port_oid).c_str());
+        return SAI_STATUS_FAILURE;
+    }
+
+    int sw_if_index = get_sw_if_idx(hwif_name.c_str());
+    if (sw_if_index < 0) {
+        SWSS_LOG_ERROR("IN_PORTS: sw_if_index not found for hwif %s (port %s); ingress-port match will be incomplete",
+                       hwif_name.c_str(), sai_serialize_object_id(port_oid).c_str());
+        return SAI_STATUS_FAILURE;
+    }
+
+    if (rule->in_ports_count >= VPP_ACL_MAX_IN_PORTS) {
+        SWSS_LOG_ERROR("IN_PORTS: exceeded max %d ingress ports; dropping port %s (hwif %s)",
+                       VPP_ACL_MAX_IN_PORTS, sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str());
+        return SAI_STATUS_FAILURE;
+    }
+
+    rule->in_ports[rule->in_ports_count++] = (uint32_t) sw_if_index;
+    SWSS_LOG_NOTICE("IN_PORTS: added ingress port %s (hwif %s, sw_if_index %d) to ACL rule (count now %u)",
+                    sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str(),
+                    sw_if_index, rule->in_ports_count);
+
+    return SAI_STATUS_SUCCESS;
+}
+
 sai_status_t SwitchVpp::acl_rule_field_update(
     _In_ sai_acl_entry_attr_t          attr_id,
     _In_ const sai_attribute_value_t  *value,
@@ -460,6 +494,34 @@ sai_status_t SwitchVpp::acl_rule_field_update(
         rule->proto = value->aclfield.data.u8 & value->aclfield.mask.u8;
         break;
 
+    case SAI_ACL_ENTRY_ATTR_FIELD_IN_PORT:
+        // Single ingress-port qualifier (everflow per-interface mirroring).
+        if (value->aclfield.enable) {
+            status = acl_rule_add_in_port(value->aclfield.data.oid, rule);
+        }
+        break;
+
+    case SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS:
+        // Ingress-port-list qualifier (everflow per-interface mirroring). The
+        // mirror rule should only apply to traffic ingressing on these ports.
+        if (value->aclfield.enable) {
+            const sai_object_list_t &ports = value->aclfield.data.objlist;
+            if (ports.list == NULL) {
+                SWSS_LOG_ERROR("IN_PORTS objlist is NULL (count=%u); ingress-port match will NOT be honored "
+                               "(traffic from all ports may be mirrored)", ports.count);
+                status = SAI_STATUS_FAILURE;
+            } else {
+                SWSS_LOG_NOTICE("IN_PORTS qualifier present with %u ingress port(s)", ports.count);
+                for (uint32_t i = 0; i < ports.count; i++) {
+                    status = acl_rule_add_in_port(ports.list[i], rule);
+                    if (status != SAI_STATUS_SUCCESS) {
+                        break;
+                    }
+                }
+            }
+        }
+        break;
+
     case SAI_ACL_ENTRY_ATTR_ACTION_PACKET_ACTION:
         // MIRROR action is sticky: if a prior MIRROR_INGRESS/EGRESS already set the
         // rule to PERMIT_MIRROR, do not let PACKET_ACTION clobber it (attribute order
@@ -488,6 +550,9 @@ sai_status_t SwitchVpp::acl_rule_field_update(
             }
             rule->action = VPP_ACL_ACTION_PERMIT_MIRROR;
             rule->mirror_sw_if_index = it->second.sw_if_index;
+            SWSS_LOG_NOTICE("ACL mirror action set: session %s -> mirror_sw_if_index %u (rule proto so far %d, in_ports_count %u)",
+                            sai_serialize_object_id(oid).c_str(), rule->mirror_sw_if_index,
+                            rule->proto, rule->in_ports_count);
         }
         break;
 
@@ -804,6 +869,33 @@ sai_status_t SwitchVpp::get_sorted_aces(
             }
         }
 
+        /*
+         * SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS is an aclfield object list and hits
+         * the same transfer_list() NULL-list problem as the mirror actions
+         * above (get_max leaves objlist.count > 0 but list == NULL). Re-fetch it
+         * with a pre-allocated backing buffer so the ingress port OIDs actually
+         * land in our struct; otherwise the per-interface mirror restriction is
+         * silently dropped and traffic from all ports gets mirrored.
+         */
+        for (uint32_t i = 0; i < p_ace->attrs_count; i++) {
+            sai_attribute_t *attr = &p_ace->attrs[i];
+
+            if (attr->id != SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS) {
+                continue;
+            }
+
+            attr->value.aclfield.data.objlist.list = p_ace->in_ports_objid_list;
+            attr->value.aclfield.data.objlist.count = MAX_ACL_IN_PORTS;
+
+            sai_status_t st = get(SAI_OBJECT_TYPE_ACL_ENTRY, sid, 1, attr);
+            if (st != SAI_STATUS_SUCCESS) {
+                SWSS_LOG_WARN("Failed to re-fetch IN_PORTS field attr for %s: %s",
+                              sid.c_str(), sai_serialize_status(st).c_str());
+                attr->value.aclfield.data.objlist.list = NULL;
+                attr->value.aclfield.data.objlist.count = 0;
+            }
+        }
+
         p_ace->attr_range.value.aclfield.data.objlist.list = p_ace->range_objid_list;
         p_ace->attr_range.value.aclfield.data.objlist.count = 2;
 
@@ -978,6 +1070,18 @@ sai_status_t SwitchVpp::fill_acl_rules(
                             rule.srcport_or_icmptype_first, rule.srcport_or_icmptype_last,
                             rule.dstport_or_icmpcode_first, rule.dstport_or_icmpcode_last);
                 }
+            }
+
+            // Bug A diagnostics: surface the fully-built rule so we can confirm
+            // whether a mirror rule (e.g. EVERFLOWV6 ipv6/TCP) was actually
+            // generated, with which protocol, mirror target and ingress-port
+            // restriction. Logged at NOTICE only for mirror rules to avoid noise.
+            if (rule.action == VPP_ACL_ACTION_PERMIT_MIRROR) {
+                SWSS_LOG_NOTICE("Mirror ACL rule built (ace index %u, priority %u): proto=%d, "
+                                "src_af=%d, dst_af=%d, mirror_sw_if_index=%u, in_ports_count=%u",
+                                ace.index, ace.priority, rule.proto,
+                                rule.src_prefix.sa_family, rule.dst_prefix.sa_family,
+                                rule.mirror_sw_if_index, rule.in_ports_count);
             }
 
             // If port/port_range is set but protocol is not set, create 2 rules: UDP and TCP

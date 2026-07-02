@@ -846,6 +846,18 @@ namespace saivs
                     _Out_ vpp_acl_rule_t *rule);
 
             /**
+             * @brief Resolves a port OID to a VPP sw_if_index and appends it to
+             * an ACL rule's ingress-port match set (IN_PORT/IN_PORTS qualifier).
+             *
+             * Member function so it can resolve the port OID to a hwif name via
+             * vpp_get_hwif_name(). in_ports_count == 0 on the rule means "match
+             * any ingress port".
+             */
+            sai_status_t acl_rule_add_in_port(
+                    _In_ sai_object_id_t port_oid,
+                    _Out_ vpp_acl_rule_t *rule);
+
+            /**
              * @brief Binds or unbinds a tunnel termination ACL table to/from an interface.
              *
              * @param[in] tbl_oid The object ID of the ACL table to be bound or unbound.

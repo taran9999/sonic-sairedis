@@ -61,6 +61,14 @@ extern "C" {
         VPP_ACL_ACTION_PERMIT_MIRROR = 3,
     } vpp_acl_action_e;
 
+/*
+ * Maximum number of ingress interfaces that can be attached to a single ACL
+ * rule via the SAI_ACL_ENTRY_ATTR_FIELD_IN_PORT(S) qualifier. Used by everflow
+ * per-interface mirroring to restrict which ingress ports a mirror rule applies
+ * to.
+ */
+#define VPP_ACL_MAX_IN_PORTS 64
+
     typedef struct  _vpp_acl_rule {
         vpp_acl_action_e action;
         vpp_ip_addr_t src_prefix;
@@ -75,6 +83,15 @@ extern "C" {
         uint8_t tcp_flags_mask;
         uint8_t tcp_flags_value;
         uint32_t mirror_sw_if_index;
+        /*
+         * Ingress-port match set (VPP sw_if_index values) from the SAI
+         * IN_PORT/IN_PORTS qualifier. in_ports_count == 0 means "match any
+         * ingress port" (the default, current behavior). When non-zero the
+         * rule should only match/mirror traffic ingressing on one of the
+         * listed interfaces.
+         */
+        uint32_t in_ports_count;
+        uint32_t in_ports[VPP_ACL_MAX_IN_PORTS];
     } vpp_acl_rule_t;
 
     typedef struct _vpp_acl_ {

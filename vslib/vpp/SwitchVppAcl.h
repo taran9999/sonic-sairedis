@@ -14,6 +14,13 @@ extern "C" {
  */
 #define MAX_ACL_MIRROR_OIDS 4
 
+/*
+ * Maximum number of ingress port OIDs we re-fetch for a single ACL entry's
+ * SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS qualifier. Kept in sync with
+ * VPP_ACL_MAX_IN_PORTS so a fully populated list survives the re-fetch.
+ */
+#define MAX_ACL_IN_PORTS 64
+
 typedef struct _acl_tbl_entries_ {
     uint32_t priority;
 
@@ -34,6 +41,13 @@ typedef struct _acl_tbl_entries_ {
      */
     sai_object_id_t mirror_ingress_objid_list[MAX_ACL_MIRROR_OIDS];
     sai_object_id_t mirror_egress_objid_list[MAX_ACL_MIRROR_OIDS];
+
+    /*
+     * Backing storage for the SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS object list.
+     * Same transfer_list() NULL-list caveat as the mirror lists above: get_max()
+     * leaves dst.list = NULL, so we re-fetch the port OID list into this buffer.
+     */
+    sai_object_id_t in_ports_objid_list[MAX_ACL_IN_PORTS];
 } acl_tbl_entries_t;
 
 typedef struct ordered_ace_list_ {
