@@ -745,8 +745,29 @@ namespace saivs
             sai_status_t fill_acl_rules(
                     _In_ acl_tbl_entries_t *aces,
                     _In_ std::list<ordered_ace_list_t> &ordered_aces,
+                    _In_ bool table_has_v4,
+                    _In_ bool table_has_v6,
                     _Out_ std::list<vpp_acl_rule_t> &acl_rules,
                     _Out_ std::list<vpp_tunterm_acl_rule_t> &tunterm_acl_rules);
+
+            /**
+             * @brief Determines the IP address family/families an ACL table matches on.
+             *
+             * Reads the table's declared match-field bitmap (SAI_ACL_TABLE_ATTR_FIELD_*)
+             * to classify it as IPv4-capable and/or IPv6-capable. Used to give an
+             * address-less rule (e.g. an Everflow mirror rule that only matches on
+             * L4 protocol) the correct IP family, since VPP classifies each ACL rule
+             * as IPv4 or IPv6 based on its prefix and would otherwise default such a
+             * rule to IPv4 and never match IPv6 traffic.
+             *
+             * @param[in] tbl_oid ACL table object ID.
+             * @param[out] has_v4 Set true if the table matches on IPv4 fields.
+             * @param[out] has_v6 Set true if the table matches on IPv6 fields.
+             */
+            void acl_table_get_ip_version(
+                    _In_ sai_object_id_t tbl_oid,
+                    _Out_ bool &has_v4,
+                    _Out_ bool &has_v6);
 
             /**
              * @brief Creates or replaces the provided ACL in VS.

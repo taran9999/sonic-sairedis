@@ -964,9 +964,79 @@ void SwitchVpp::count_tunterm_acl_rules(
     }
 }
 
+void SwitchVpp::acl_table_get_ip_version(
+    sai_object_id_t tbl_oid,
+    bool &has_v4,
+    bool &has_v6)
+{
+    SWSS_LOG_ENTER();
+
+    has_v4 = false;
+    has_v6 = false;
+
+    auto sid = sai_serialize_object_id(tbl_oid);
+
+    const uint32_t MAX_TBL_ATTRS = 64;
+    // Zero-initialize the buffer. get_max()/transfer_attributes() copies each
+    // attribute into this array, and for list-valued table attributes
+    // (e.g. bind-point-type list, action-type list, range-type list on a
+    // mirror ACL table) transfer_list() dereferences the destination's
+    // value.*list.list/.count. If left uninitialized those are garbage stack
+    // values and transfer_list() writes through a wild pointer, crashing syncd.
+    // Zeroing forces count==0 so transfer_list() takes the safe no-copy path;
+    // we only read booldata fields here anyway.
+    sai_attribute_t attrs[MAX_TBL_ATTRS];
+    memset(attrs, 0, sizeof(attrs));
+    uint32_t count = 0;
+
+    sai_status_t st = get_max(SAI_OBJECT_TYPE_ACL_TABLE, sid, MAX_TBL_ATTRS, &count, attrs);
+    if (st != SAI_STATUS_SUCCESS && st != SAI_STATUS_BUFFER_OVERFLOW) {
+        SWSS_LOG_WARN("Failed to read ACL table %s attrs to determine IP version: %s",
+                      sid.c_str(), sai_serialize_status(st).c_str());
+        return;
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        const sai_attribute_t *a = &attrs[i];
+
+        switch (a->id) {
+        case SAI_ACL_TABLE_ATTR_FIELD_SRC_IP:
+        case SAI_ACL_TABLE_ATTR_FIELD_DST_IP:
+        case SAI_ACL_TABLE_ATTR_FIELD_INNER_SRC_IP:
+        case SAI_ACL_TABLE_ATTR_FIELD_INNER_DST_IP:
+        case SAI_ACL_TABLE_ATTR_FIELD_ICMP_TYPE:
+        case SAI_ACL_TABLE_ATTR_FIELD_ICMP_CODE:
+            if (a->value.booldata) {
+                has_v4 = true;
+            }
+            break;
+
+        case SAI_ACL_TABLE_ATTR_FIELD_SRC_IPV6:
+        case SAI_ACL_TABLE_ATTR_FIELD_DST_IPV6:
+        case SAI_ACL_TABLE_ATTR_FIELD_INNER_SRC_IPV6:
+        case SAI_ACL_TABLE_ATTR_FIELD_INNER_DST_IPV6:
+        case SAI_ACL_TABLE_ATTR_FIELD_IPV6_NEXT_HEADER:
+        case SAI_ACL_TABLE_ATTR_FIELD_ICMPV6_TYPE:
+        case SAI_ACL_TABLE_ATTR_FIELD_ICMPV6_CODE:
+            if (a->value.booldata) {
+                has_v6 = true;
+            }
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    SWSS_LOG_NOTICE("ACL table %s IP version: has_v4=%d has_v6=%d",
+                    sid.c_str(), has_v4, has_v6);
+}
+
 sai_status_t SwitchVpp::fill_acl_rules(
     acl_tbl_entries_t *aces,
     std::list<ordered_ace_list_t> &ordered_aces,
+    bool table_has_v4,
+    bool table_has_v6,
     std::list<vpp_acl_rule_t> &acl_rules,
     std::list<vpp_tunterm_acl_rule_t> &tunterm_acl_rules)
 {
@@ -1084,25 +1154,61 @@ sai_status_t SwitchVpp::fill_acl_rules(
                                 rule.mirror_sw_if_index, rule.in_ports_count);
             }
 
-            // If port/port_range is set but protocol is not set, create 2 rules: UDP and TCP
-            if (port_proto && rule.proto == 0) {
-                // Create UDP rule
-                vpp_acl_rule_t udp_rule = rule;
-                udp_rule.proto = IPPROTO_UDP;
-                acl_rules.push_back(udp_rule);
-                rules_added++;
-                SWSS_LOG_INFO("Added UDP rule for port-based ACL entry");
+            // Determine the rule's IP family. VPP classifies each ACL rule as
+            // IPv4 or IPv6 from its prefix; a rule with no IP prefix defaults to
+            // IPv4 in vpp_acl_add_replace. An Everflow mirror rule that only
+            // matches on L4 protocol (e.g. EVERFLOWV6 "ip protocol 6") carries no
+            // IP address, so without help it would be emitted as IPv4-only and
+            // never match IPv6 traffic. Use the parent table's declared IP family
+            // to give such an address-less rule the correct family (and, for a
+            // dual-family table, emit both an IPv4 and an IPv6 variant).
+            bool rule_has_ip_family =
+                (rule.src_prefix.sa_family == AF_INET  || rule.dst_prefix.sa_family == AF_INET ||
+                 rule.src_prefix.sa_family == AF_INET6 || rule.dst_prefix.sa_family == AF_INET6);
 
-                // Create TCP rule
-                vpp_acl_rule_t tcp_rule = rule;
-                tcp_rule.proto = IPPROTO_TCP;
-                acl_rules.push_back(tcp_rule);
-                rules_added++;
-                SWSS_LOG_INFO("Added TCP rule for port-based ACL entry");
+            std::vector<vpp_acl_rule_t> family_variants;
+            if (!rule_has_ip_family && (table_has_v4 || table_has_v6)) {
+                if (table_has_v4) {
+                    // Zero/unspec address is emitted as IPv4 any by vpp_acl_add_replace.
+                    family_variants.push_back(rule);
+                }
+                if (table_has_v6) {
+                    vpp_acl_rule_t v6_rule = rule;
+                    set_ipv6any_addr_mask(&v6_rule.src_prefix);
+                    set_ipv6any_addr_mask(&v6_rule.dst_prefix);
+                    set_ipv6any_addr_mask(&v6_rule.src_prefix_mask);
+                    set_ipv6any_addr_mask(&v6_rule.dst_prefix_mask);
+                    family_variants.push_back(v6_rule);
+                    SWSS_LOG_NOTICE("Address-less ACL rule in IPv6-capable table (ace index %u): "
+                                    "emitting IPv6 variant (proto=%d, action=%d)",
+                                    ace.index, v6_rule.proto, v6_rule.action);
+                }
             } else {
-                // Add the single rule
-                acl_rules.push_back(rule);
-                rules_added++;
+                family_variants.push_back(rule);
+            }
+
+            // If port/port_range is set but protocol is not set, create 2 rules
+            // (UDP and TCP) per family variant.
+            for (auto &fr : family_variants) {
+                if (port_proto && fr.proto == 0) {
+                    // Create UDP rule
+                    vpp_acl_rule_t udp_rule = fr;
+                    udp_rule.proto = IPPROTO_UDP;
+                    acl_rules.push_back(udp_rule);
+                    rules_added++;
+                    SWSS_LOG_INFO("Added UDP rule for port-based ACL entry");
+
+                    // Create TCP rule
+                    vpp_acl_rule_t tcp_rule = fr;
+                    tcp_rule.proto = IPPROTO_TCP;
+                    acl_rules.push_back(tcp_rule);
+                    rules_added++;
+                    SWSS_LOG_INFO("Added TCP rule for port-based ACL entry");
+                } else {
+                    // Add the single rule
+                    acl_rules.push_back(fr);
+                    rules_added++;
+                }
             }
 
             ace.num_rules = rules_added;
@@ -1362,8 +1468,16 @@ sai_status_t SwitchVpp::AclTblConfig(
 
     SWSS_LOG_INFO("Total ACL entries: %ld", n_total_entries);
 
+    // Determine the table's IP family so address-less rules (e.g. an Everflow
+    // mirror rule matching only on L4 protocol) get emitted with the correct
+    // IPv4/IPv6 family instead of defaulting to IPv4.
+    bool table_has_v4 = false;
+    bool table_has_v6 = false;
+    acl_table_get_ip_version(tbl_oid, table_has_v4, table_has_v6);
+
     // Fill ACL rules - this returns converted rule lists
-    CHECK_STATUS_ACLTBLCONFIG(fill_acl_rules(aces, ordered_aces, acl_rules, tunterm_acl_rules));
+    CHECK_STATUS_ACLTBLCONFIG(fill_acl_rules(aces, ordered_aces, table_has_v4, table_has_v6,
+                                             acl_rules, tunterm_acl_rules));
 
     SWSS_LOG_INFO("Generated %ld regular ACL rules and %ld tunterm ACL rules",
                     acl_rules.size(), tunterm_acl_rules.size());
