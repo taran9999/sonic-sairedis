@@ -99,8 +99,14 @@ sai_status_t SwitchVpp::createMirrorSession(
             tunnel.ttl = session_ttl;
         }
 
-        // derive tunnel instance from session id
-        tunnel.instance = (uint32_t)session_id;
+        // The GRE tunnel instance drives the greN interface name and its entry
+        // in VPP's interface-name hash. Do NOT derive it from session_id: the
+        // pool recycles freed session ids (alloc() returns the lowest free
+        // bit), so a remove+recreate would delete greN and immediately re-add
+        // greN while the old teardown is still in flight, corrupting the VPP
+        // heap. Use a strictly monotonic instance so a just-deleted interface
+        // name is never reused.
+        tunnel.instance = m_next_gre_instance++;
         tunnel.outer_table_id = 0;
 
         uint32_t gre_instance = tunnel.instance;
@@ -115,13 +121,18 @@ sai_status_t SwitchVpp::createMirrorSession(
         }
         SWSS_LOG_NOTICE("GRE mirror tunnel created: session_id=%d sw_if_index=%u", session_id, gre_sw_if_index);
 
-        refresh_interfaces_list();
-
+        // Bring the GRE interface up using the sw_if_index returned by the tunnel
+        // add above. Do NOT call refresh_interfaces_list() here: that performs a
+        // full teardown and rebuild of VPP's global interface-name hashes, and
+        // repeating it on every mirror create (each ECMP test re-points the
+        // session via remove+create) churns the VPP clib heap until a hash-grow
+        // realloc trips its free-list integrity check and aborts syncd. Setting
+        // the state directly by index avoids the name lookup that needed it.
         std::string gre_ifname = "gre" + std::to_string(gre_instance);
-        SWSS_LOG_INFO("gre tunnel created with ifname %s", gre_ifname.c_str());
-        int up_ret = interface_set_state(gre_ifname.c_str(), true);
+        SWSS_LOG_INFO("gre tunnel created with ifname %s sw_if_index %u", gre_ifname.c_str(), gre_sw_if_index);
+        int up_ret = interface_set_state_by_index(gre_sw_if_index, true);
         if(up_ret != 0) {
-            SWSS_LOG_ERROR("Failed to bring up gre tunnel %s, ret=%d", gre_ifname.c_str(), up_ret);
+            SWSS_LOG_ERROR("Failed to bring up gre tunnel %s (sw_if_index %u), ret=%d", gre_ifname.c_str(), gre_sw_if_index, up_ret);
             vpp_gre_tunnel_add_del(&tunnel, false, &gre_sw_if_index);
             m_erspan_session_id_pool.free((uint32_t)session_id);
             return SAI_STATUS_FAILURE;

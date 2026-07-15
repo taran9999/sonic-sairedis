@@ -2810,6 +2810,35 @@ int interface_set_state (const char *hwif_name, bool is_up)
     return ret;
 }
 
+/*
+ * Set admin state of an interface directly by its sw_if_index. This avoids the
+ * name->index lookup (get_swif_idx) that relies on the interface-name hash, and
+ * therefore lets callers who already know the index skip refresh_interfaces_list()
+ * and its costly teardown/rebuild of the global interface-name hashes.
+ */
+int interface_set_state_by_index (uint32_t sw_if_index, bool is_up)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sw_interface_set_flags_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = interface_msg_id_base;
+
+    M (SW_INTERFACE_SET_FLAGS, mp);
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->flags = htonl ((is_up) ? IF_STATUS_API_FLAG_ADMIN_UP : 0);
+
+    S (mp);
+
+    WR (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
 int interface_get_state (const char *hwif_name, bool *link_is_up)
 {
     vat_main_t *vam = &vat_main;

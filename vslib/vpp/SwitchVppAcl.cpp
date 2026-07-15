@@ -1166,22 +1166,38 @@ sai_status_t SwitchVpp::fill_acl_rules(
                 (rule.src_prefix.sa_family == AF_INET  || rule.dst_prefix.sa_family == AF_INET ||
                  rule.src_prefix.sa_family == AF_INET6 || rule.dst_prefix.sa_family == AF_INET6);
 
+            // A mirror rule that matches purely on non-L3 fields (e.g. the
+            // per-interface Everflow rule that only matches the ingress port)
+            // is meant to mirror ALL traffic on that port, regardless of L3
+            // family. On a real ASIC such a "match everything" rule mirrors
+            // both IPv4 and IPv6; in VPP every ACL rule is classified per
+            // family and an address-less rule defaults to IPv4-only, so IPv6
+            // traffic is never mirrored. We cannot rely on the parent table's
+            // declared family here: the Everflow MIRROR table only declares
+            // IPv4 fields (SRC_IP/DST_IP/ICMP/IP_PROTOCOL) even though it is
+            // expected to mirror IPv6 too. So for an address-less mirror rule,
+            // always emit both an IPv4 and an IPv6 variant.
+            bool is_mirror_rule = (rule.action == VPP_ACL_ACTION_PERMIT_MIRROR);
+            bool want_v4 = table_has_v4 || is_mirror_rule;
+            bool want_v6 = table_has_v6 || is_mirror_rule;
+
             std::vector<vpp_acl_rule_t> family_variants;
-            if (!rule_has_ip_family && (table_has_v4 || table_has_v6)) {
-                if (table_has_v4) {
+            if (!rule_has_ip_family && (want_v4 || want_v6)) {
+                if (want_v4) {
                     // Zero/unspec address is emitted as IPv4 any by vpp_acl_add_replace.
                     family_variants.push_back(rule);
                 }
-                if (table_has_v6) {
+                if (want_v6) {
                     vpp_acl_rule_t v6_rule = rule;
                     set_ipv6any_addr_mask(&v6_rule.src_prefix);
                     set_ipv6any_addr_mask(&v6_rule.dst_prefix);
                     set_ipv6any_addr_mask(&v6_rule.src_prefix_mask);
                     set_ipv6any_addr_mask(&v6_rule.dst_prefix_mask);
                     family_variants.push_back(v6_rule);
-                    SWSS_LOG_NOTICE("Address-less ACL rule in IPv6-capable table (ace index %u): "
-                                    "emitting IPv6 variant (proto=%d, action=%d)",
-                                    ace.index, v6_rule.proto, v6_rule.action);
+                    SWSS_LOG_NOTICE("Address-less ACL rule (ace index %u): emitting IPv6 variant "
+                                    "(proto=%d, action=%d, is_mirror=%d, table_has_v4=%d, table_has_v6=%d)",
+                                    ace.index, v6_rule.proto, v6_rule.action,
+                                    is_mirror_rule, table_has_v4, table_has_v6);
                 }
             } else {
                 family_variants.push_back(rule);

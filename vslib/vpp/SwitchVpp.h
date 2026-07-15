@@ -1059,7 +1059,15 @@ namespace saivs
             uint32_t m_mirror_session_count = 0;
 
             BitResourcePool m_erspan_session_id_pool{1024, 0};
-            uint16_t m_next_erspan_session_id = 1;
+
+            // VPP GRE tunnel "instance" drives the greN interface name and its
+            // registration in VPP's interface-name hash / FIB. It MUST NOT be
+            // reused for the lifetime of the switch: reusing a just-freed
+            // instance makes VPP delete greN and immediately re-add greN while
+            // the previous teardown is still in flight, corrupting the VPP clib
+            // heap. Keep it strictly monotonic and independent of the pooled
+            // (recyclable) 16-bit ERSPAN session_id.
+            uint32_t m_next_gre_instance = 0;
 
             struct MirrorSessionInfo {
                 uint32_t sw_if_index;
