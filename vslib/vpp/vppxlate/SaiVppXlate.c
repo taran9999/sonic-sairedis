@@ -1262,15 +1262,15 @@ vl_api_sw_interface_span_enable_disable_reply_t_handler(vl_api_sw_interface_span
 }
 
 static void
-vl_api_gre_tunnel_add_del_v2_reply_t_handler(vl_api_gre_tunnel_add_del_v2_reply_t *msg)
+vl_api_gre_tunnel_add_del_v3_reply_t_handler(vl_api_gre_tunnel_add_del_v3_reply_t *msg)
 {
     set_reply_sw_if_index(ntohl(msg->sw_if_index));
 
     int retval = (int)ntohl((uint32_t)msg->retval);
     set_reply_status(retval);
 
-    if (retval) { SAIVPP_ERROR("gre_tunnel_add_del_v2 handler failed(%d)", retval); }
-    else { SAIVPP_INFO("gre_tunnel_add_del_v2 handler successful: if_idx,%d", ntohl(msg->sw_if_index)); }
+    if (retval) { SAIVPP_ERROR("gre_tunnel_add_del_v3 handler failed(%d)", retval); }
+    else { SAIVPP_INFO("gre_tunnel_add_del_v3 handler successful: if_idx,%d", ntohl(msg->sw_if_index)); }
 }
 
 #define vl_api_get_first_msg_id_reply_t_handler vl_noop_handler
@@ -1393,14 +1393,14 @@ static void vpp_ext_vpe_init(void)
 #undef _
 
 // no tojson/fromjson for gre
-vl_msg_api_set_handlers(GRE_MSG_ID(GRE_TUNNEL_ADD_DEL_V2_REPLY),
-                        "gre_tunnel_add_del_v2_reply",
-                        vl_api_gre_tunnel_add_del_v2_reply_t_handler,
+vl_msg_api_set_handlers(GRE_MSG_ID(GRE_TUNNEL_ADD_DEL_V3_REPLY),
+                        "gre_tunnel_add_del_v3_reply",
+                        vl_api_gre_tunnel_add_del_v3_reply_t_handler,
                         vl_noop_handler,
-                        vl_api_gre_tunnel_add_del_v2_reply_t_endian,
-                        sizeof(vl_api_gre_tunnel_add_del_v2_reply_t), 1,
+                        vl_api_gre_tunnel_add_del_v3_reply_t_endian,
+                        sizeof(vl_api_gre_tunnel_add_del_v3_reply_t), 1,
                         0, 0,
-                        vl_api_gre_tunnel_add_del_v2_reply_t_calc_size);
+                        vl_api_gre_tunnel_add_del_v3_reply_t_calc_size);
 }
 
 static void vl_api_lcp_itf_pair_add_del_reply_t_handler(vl_api_lcp_itf_pair_add_del_reply_t *msg)
@@ -4192,7 +4192,7 @@ int vpp_span_enable_disable(uint32_t sw_if_index_from, uint32_t sw_if_index_to, 
 int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_index)
 {
     vat_main_t *vam = &vat_main;
-    vl_api_gre_tunnel_add_del_v2_t *mp;
+    vl_api_gre_tunnel_add_del_v3_t *mp;
     int ret;
     vpp_ip_addr_t *addr;
     vl_api_address_t *api_addr;
@@ -4201,7 +4201,7 @@ int vpp_gre_tunnel_add_del(vpp_gre_tunnel_t *tunnel, bool is_add, u32 *sw_if_ind
 
     __plugin_msg_base = gre_msg_id_base;
 
-    M (GRE_TUNNEL_ADD_DEL_V2, mp);
+    M (GRE_TUNNEL_ADD_DEL_V3, mp);
 
     mp->is_add = is_add;
     mp->tunnel.type = tunnel->type;
