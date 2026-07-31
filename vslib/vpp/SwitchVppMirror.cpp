@@ -149,7 +149,29 @@ sai_status_t SwitchVpp::createMirrorSession(
         return SAI_STATUS_FAILURE;
     }
 
-    CHECK_STATUS(create_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sid, switch_id, attr_count, attr_list));
+    sai_status_t create_status = create_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sid, switch_id, attr_count, attr_list);
+    if(create_status != SAI_STATUS_SUCCESS) {
+        SWSS_LOG_ERROR("Failed to create mirror session %s in SAI DB, status=%d", sid.c_str(), create_status);
+        // Unwind the VPP resources allocated above. The GRE tunnel-scoped locals
+        // (tunnel/gre_sw_if_index/session_id) are out of scope here, so rebuild
+        // the delete key from info exactly as removeMirrorSession does.
+        if(info.is_erspan) {
+            vpp_gre_tunnel_t tunnel{};
+            tunnel.instance = info.gre_instance;
+            tunnel.type = 2;
+            tunnel.src = info.src_ip;
+            tunnel.dst = info.dst_ip;
+            tunnel.session_id = info.session_id;
+            tunnel.outer_table_id = 0;
+            uint32_t sw_if_index = 0;
+            int ret = vpp_gre_tunnel_add_del(&tunnel, false, &sw_if_index);
+            if(ret != 0) {
+                SWSS_LOG_ERROR("Failed to remove GRE tunnel for ERSPAN session after SAI DB create failure, ret=%d", ret);
+            }
+            m_erspan_session_id_pool.free((uint32_t)info.session_id);
+        }
+        return create_status;
+    }
 
     m_mirror_sessions[object_id] = info;
     m_mirror_session_count++;
@@ -189,21 +211,24 @@ sai_status_t SwitchVpp::removeMirrorSession(
         uint32_t sw_if_index = 0;
         int ret = vpp_gre_tunnel_add_del(&tunnel, false, &sw_if_index);
         if(ret != 0) {
-            SWSS_LOG_ERROR("Failed to remove GRE tunnel for ERSPAN session, ret=%d", ret);
-            return SAI_STATUS_FAILURE;
+            // The VPP tunnel delete failed and is not retryable in a useful way
+            // (a stuck tunnel stays stuck). Do NOT leak the session id or leave a
+            // half-dead m_mirror_sessions entry behind: free the id and let the
+            // erase below drop the entry so the id/OID can be reused cleanly.
+            SWSS_LOG_ERROR("Failed to remove GRE tunnel for ERSPAN session, ret=%d; freeing session id and dropping entry anyway", ret);
         }
 
-        // Recycle the ERSPAN session id only after VPP confirmed the tunnel
-        // is gone, so a re-allocation cannot collide with a still-live tunnel.
+        // Recycle the ERSPAN session id. Done after the delete attempt so that,
+        // on success, a re-allocation cannot collide with a still-live tunnel.
         m_erspan_session_id_pool.free((uint32_t)info.session_id);
     }
 
-    CHECK_STATUS(remove_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sai_serialize_object_id(object_id)));
-
     m_mirror_sessions.erase(it);
     m_mirror_session_count--;
+    SWSS_LOG_NOTICE("Removed mirror session entry %s, mirror session count: %d", sai_serialize_object_id(object_id).c_str(), m_mirror_session_count);
 
-    SWSS_LOG_NOTICE("Removed mirror session %s, mirror session count: %d", sai_serialize_object_id(object_id).c_str(), m_mirror_session_count);
+    CHECK_STATUS(remove_internal(SAI_OBJECT_TYPE_MIRROR_SESSION, sai_serialize_object_id(object_id)));
+    SWSS_LOG_NOTICE("Removed mirror session %s from SAI DB", sai_serialize_object_id(object_id).c_str());
 
     return SAI_STATUS_SUCCESS;
 }
