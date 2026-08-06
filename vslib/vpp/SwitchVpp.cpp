@@ -1614,6 +1614,13 @@ sai_status_t SwitchVpp::set(
         return setLag(objectId, attr);
     }
 
+    if (objectType == SAI_OBJECT_TYPE_MIRROR_SESSION)
+    {
+        sai_object_id_t objectId;
+        sai_deserialize_object_id(serializedObjectId, objectId);
+        return setMirrorSession(objectId, attr);
+    }
+
     return set_internal(objectType, serializedObjectId, attr);
 }
 

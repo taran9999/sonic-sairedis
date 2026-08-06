@@ -1076,9 +1076,30 @@ namespace saivs
                 vpp_ip_addr_t dst_ip;
                 uint16_t session_id;
                 uint32_t gre_instance; // GRE tunnel instance for erspan
+
+                // ERSPAN single-stable-monitor-port pin. orchagent's MirrorOrch
+                // resolves the ERSPAN destination to ONE next hop and hands us
+                // its egress port (SAI_MIRROR_SESSION_ATTR_MONITOR_PORT) plus the
+                // neighbor MAC (SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS), and
+                // re-points them via SET only when that member leaves the ECMP
+                // group. We honor that by installing a /32 host route for dst_ip
+                // that forwards via the resolved nexthop out the monitor port,
+                // overriding the mirror-dst ECMP load-balance so the encapped
+                // copy egresses one STABLE port.
+                bool monitor_pinned;          // true once a monitor pin is installed
+                sai_object_id_t monitor_port; // current SAI MONITOR_PORT oid
+                std::string monitor_hwif;     // VPP hwif of the pinned monitor port
+                sai_mac_t monitor_mac;        // current DST_MAC (nexthop L2 address)
+                sai_ip_address_t monitor_nh;  // resolved nexthop IP the /32 pin routes via
             };
 
             std::map<sai_object_id_t, MirrorSessionInfo> m_mirror_sessions;
+
+            // Monitor-port pin support: port oid -> (neighbor ip string ->
+            // neighbor mac string), maintained from SAI neighbor create/remove.
+            // Used to resolve the ERSPAN monitor port's nexthop IP from
+            // (MONITOR_PORT, DST_MAC).
+            std::map<sai_object_id_t, std::map<std::string, std::string>> m_port_neighbor_mac;
 
             struct PortMirrorBinding {
                 sai_object_id_t session_oid;
@@ -1098,6 +1119,31 @@ namespace saivs
                         _In_ const sai_attribute_t *attr_list);
         
                 sai_status_t removeMirrorSession(_In_ sai_object_id_t object_id);
+
+                sai_status_t setMirrorSession(
+                        _In_ sai_object_id_t object_id,
+                        _In_ const sai_attribute_t *attr);
+
+                // Resolve the ERSPAN monitor port's nexthop IP from
+                // (monitor_port, DST_MAC) using the neighbor index.
+                bool resolveMonitorNexthop(
+                        _In_ sai_object_id_t monitor_port,
+                        _In_ const sai_mac_t mac,
+                        _Out_ sai_ip_address_t &nexthop);
+
+                // (Re)compute and install the ERSPAN monitor pin for the given
+                // monitor port + DST_MAC, tearing down any previous pin first.
+                sai_status_t applyErspanMonitor(
+                        _In_ MirrorSessionInfo &info,
+                        _In_ sai_object_id_t monitor_port,
+                        _In_ const sai_mac_t mac);
+
+                // Install (is_add=true) or remove (is_add=false) the ERSPAN
+                // single-monitor-port pin (a /32 host route for info.dst_ip via
+                // info.monitor_nh out info.monitor_hwif).
+                sai_status_t pinErspanMonitor(
+                        _In_ MirrorSessionInfo &info,
+                        _In_ bool is_add);
 
     };
 }

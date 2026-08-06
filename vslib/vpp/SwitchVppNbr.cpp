@@ -95,6 +95,28 @@ sai_status_t SwitchVpp::addRemoveIpNbr(
         return SAI_STATUS_FAILURE;
     }
 
+    // Maintain the port -> (neighbor ip -> neighbor mac) index used to resolve
+    // an ERSPAN mirror monitor port's nexthop IP from (MONITOR_PORT, DST_MAC).
+    {
+        auto nbrIpStr = sai_serialize_ip_address(nbr_entry.ip_address);
+        if (is_add)
+        {
+            m_port_neighbor_mac[port_oid][nbrIpStr] = sai_serialize_mac(nbr_mac);
+        }
+        else
+        {
+            auto pit = m_port_neighbor_mac.find(port_oid);
+            if (pit != m_port_neighbor_mac.end())
+            {
+                pit->second.erase(nbrIpStr);
+                if (pit->second.empty())
+                {
+                    m_port_neighbor_mac.erase(pit);
+                }
+            }
+        }
+    }
+
     std::string hwif_name;
     bool found = vpp_get_hwif_name(port_oid, vlan_id, hwif_name);
     if (found == false)
