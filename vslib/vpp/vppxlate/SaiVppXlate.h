@@ -84,6 +84,12 @@ extern "C" {
         uint8_t tcp_flags_value;
         uint32_t mirror_sw_if_index;
         /*
+         * SAI mirror session stage for the PERMIT_MIRROR action. 0 = ingress
+         * (clone reflects the packet as received); 1 = egress (clone reflects
+         * the packet as it egresses, post-route: TTL-1, router SMAC, nh DMAC).
+         */
+        uint8_t mirror_is_egress;
+        /*
          * Ingress-port match set (VPP sw_if_index values) from the SAI
          * IN_PORT/IN_PORTS qualifier. in_ports_count == 0 means "match any
          * ingress port" (the default, current behavior). When non-zero the

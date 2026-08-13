@@ -550,8 +550,11 @@ sai_status_t SwitchVpp::acl_rule_field_update(
             }
             rule->action = VPP_ACL_ACTION_PERMIT_MIRROR;
             rule->mirror_sw_if_index = it->second.sw_if_index;
-            SWSS_LOG_NOTICE("ACL mirror action set: session %s -> mirror_sw_if_index %u (rule proto so far %d, in_ports_count %u)",
+            // SAI mirror stage -> VPP: egress clones the post-route view, ingress the received view.
+            rule->mirror_is_egress = (attr_id == SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_EGRESS) ? 1 : 0;
+            SWSS_LOG_NOTICE("ACL mirror action set: session %s -> mirror_sw_if_index %u stage %s (rule proto so far %d, in_ports_count %u)",
                             sai_serialize_object_id(oid).c_str(), rule->mirror_sw_if_index,
+                            rule->mirror_is_egress ? "egress" : "ingress",
                             rule->proto, rule->in_ports_count);
         }
         break;
