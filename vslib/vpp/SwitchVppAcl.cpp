@@ -1169,20 +1169,23 @@ sai_status_t SwitchVpp::fill_acl_rules(
                 (rule.src_prefix.sa_family == AF_INET  || rule.dst_prefix.sa_family == AF_INET ||
                  rule.src_prefix.sa_family == AF_INET6 || rule.dst_prefix.sa_family == AF_INET6);
 
-            // A mirror rule that matches purely on non-L3 fields (e.g. the
-            // per-interface Everflow rule that only matches the ingress port)
-            // is meant to mirror ALL traffic on that port, regardless of L3
-            // family. On a real ASIC such a "match everything" rule mirrors
-            // both IPv4 and IPv6; in VPP every ACL rule is classified per
-            // family and an address-less rule defaults to IPv4-only, so IPv6
-            // traffic is never mirrored. We cannot rely on the parent table's
-            // declared family here: the Everflow MIRROR table only declares
-            // IPv4 fields (SRC_IP/DST_IP/ICMP/IP_PROTOCOL) even though it is
-            // expected to mirror IPv6 too. So for an address-less mirror rule,
-            // always emit both an IPv4 and an IPv6 variant.
+            // Emit an address-less rule in its table's declared IP family. IPv4
+            // mirroring is programmed in the MIRROR table (SRC_IP/DST_IP/ICMP)
+            // and IPv6 mirroring in the separate MIRRORV6 table
+            // (SRC_IPV6/DST_IPV6/ICMPV6), so each table already covers its own
+            // family and forcing both here would duplicate the rule (and, with
+            // both tables bound to the same ports, mirror packets twice). Only a
+            // mirror table that declares NEITHER family is genuinely
+            // family-ambiguous (a pure port/DSCP "match everything" rule that
+            // VPP would otherwise classify as IPv4-only); emit both variants
+            // only in that case.
             bool is_mirror_rule = (rule.action == VPP_ACL_ACTION_PERMIT_MIRROR);
-            bool want_v4 = table_has_v4 || is_mirror_rule;
-            bool want_v6 = table_has_v6 || is_mirror_rule;
+            bool want_v4 = table_has_v4;
+            bool want_v6 = table_has_v6;
+            if (is_mirror_rule && !table_has_v4 && !table_has_v6) {
+                want_v4 = true;
+                want_v6 = true;
+            }
 
             std::vector<vpp_acl_rule_t> family_variants;
             if (!rule_has_ip_family && (want_v4 || want_v6)) {
