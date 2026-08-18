@@ -383,9 +383,16 @@ void os_exit(int code) {}
 do {                                                            \
     socket_client_main_t *scm = vam->socket_client_main;	\
     vam->result_ready = 0;                                      \
-    if (scm && scm->socket_enable)                              \
+    if (scm && scm->socket_enable) {                            \
+      /* The VPP client allocates a fixed-size (default 4096 byte) socket \
+         TX buffer at connect time, and vl_socket_client_msg_alloc() only \
+         does vec_set_len() without reallocating. A large variable-length \
+         message (e.g. ACL add-replace carrying many rules) would exceed  \
+         that capacity and overflow into the adjacent heap, corrupting it \
+         and crashing syncd. Grow the TX buffer to fit this message. */   \
+      vec_validate (scm->socket_tx_buffer, (int)(sizeof(*mp) + n) - 1);   \
       mp = vl_socket_client_msg_alloc ((int)(sizeof(*mp) + n));        \
-    else                                                        \
+    } else                                                      \
       mp = vl_msg_api_alloc_as_if_client((int)(sizeof(*mp) + n));      \
     clib_memset (mp, 0, sizeof (*mp));                          \
     mp->_vl_msg_id = ntohs (VL_API_##T+__plugin_msg_base);      \
