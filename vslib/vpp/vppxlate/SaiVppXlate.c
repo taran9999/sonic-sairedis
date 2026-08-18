@@ -390,7 +390,7 @@ do {                                                            \
          message (e.g. ACL add-replace carrying many rules) would exceed  \
          that capacity and overflow into the adjacent heap, corrupting it \
          and crashing syncd. Grow the TX buffer to fit this message. */   \
-      vec_validate (scm->socket_tx_buffer, (int)(sizeof(*mp) + n) - 1);   \
+      vec_validate (scm->socket_tx_buffer, (uword)(sizeof(*mp) + n) - 1); \
       mp = vl_socket_client_msg_alloc ((int)(sizeof(*mp) + n));        \
     } else                                                      \
       mp = vl_msg_api_alloc_as_if_client((int)(sizeof(*mp) + n));      \
