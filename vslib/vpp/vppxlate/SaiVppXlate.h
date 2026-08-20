@@ -21,6 +21,8 @@ extern "C" {
 #endif
 
 #include <netinet/in.h>
+#include <stdbool.h>
+#include <stdint.h>
 
     typedef enum {
 	VPP_NEXTHOP_NORMAL = 1,
@@ -68,6 +70,22 @@ extern "C" {
  * to.
  */
 #define VPP_ACL_MAX_IN_PORTS 64
+#define VPP_ACL_MIRROR_SW_IF_INDEX_MASK 0x0fffffffU
+#define VPP_ACL_MIRROR_FLAGS_SHIFT 28
+#define VPP_ACL_MIRROR_F_DEFERRED (1U << 0)
+#define VPP_ACL_MIRROR_FLAGS_MASK 0xfU
+
+#ifdef __cplusplus
+static_assert((VPP_ACL_MIRROR_SW_IF_INDEX_MASK |
+               (VPP_ACL_MIRROR_FLAGS_MASK << VPP_ACL_MIRROR_FLAGS_SHIFT)) ==
+                  UINT32_MAX,
+              "packed ACL mirror action must cover exactly 32 bits");
+#else
+_Static_assert((VPP_ACL_MIRROR_SW_IF_INDEX_MASK |
+                (VPP_ACL_MIRROR_FLAGS_MASK << VPP_ACL_MIRROR_FLAGS_SHIFT)) ==
+                   UINT32_MAX,
+               "packed ACL mirror action must cover exactly 32 bits");
+#endif
 
     typedef struct  _vpp_acl_rule {
         vpp_acl_action_e action;
@@ -82,13 +100,7 @@ extern "C" {
         uint16_t dstport_or_icmpcode_last;
         uint8_t tcp_flags_mask;
         uint8_t tcp_flags_value;
-        uint32_t mirror_sw_if_index;
-        /*
-         * SAI mirror session stage for the PERMIT_MIRROR action. 0 = ingress
-         * (clone reflects the packet as received); 1 = egress (clone reflects
-         * the packet as it egresses, post-route: TTL-1, router SMAC, nh DMAC).
-         */
-        uint8_t mirror_is_egress;
+        uint32_t mirror_action;
         /*
          * Ingress-port match set (VPP sw_if_index values) from the SAI
          * IN_PORT/IN_PORTS qualifier. in_ports_count == 0 means "match any
@@ -314,6 +326,7 @@ typedef enum {
 
     extern int vpp_acl_add_replace(vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace);
     extern int vpp_acl_del(uint32_t acl_index);
+    extern int vpp_sonic_ext_egress_mirror_enable_disable(bool enable);
     extern int vpp_acl_interface_bind(const char *hwif_name, uint32_t acl_index,
 				      bool is_input);
     extern int vpp_acl_interface_unbind(const char *hwif_name, uint32_t acl_index,

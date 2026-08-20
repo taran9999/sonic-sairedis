@@ -664,12 +664,15 @@ namespace saivs
             std::map<sai_object_id_t, std::list<std::string>> m_acl_tbl_hw_ports_map;
             std::map<sai_object_id_t, uint32_t> m_acl_swindex_map;
             std::map<sai_object_id_t, uint32_t> m_tunterm_acl_swindex_map;
+            std::map<sai_object_id_t, uint32_t> m_acl_deferred_mirror_count_map;
             std::map<sai_object_id_t, std::list<sai_object_id_t>> m_acl_tbl_grp_mbr_map;
             std::map<sai_object_id_t, std::list<sai_object_id_t>> m_acl_tbl_grp_ports_map;
             std::map<sai_object_id_t, vpp_ace_cntr_info_t> m_ace_cntr_info_map;
 
             uint32_t m_acl_default_swindex = 0;
             bool m_acl_default_created = false;
+            uint32_t m_acl_deferred_mirror_count = 0;
+            bool m_acl_egress_mirror_feature_enabled = false;
 
         protected: // VPP
 
@@ -695,6 +698,10 @@ namespace saivs
 
             sai_status_t AclTblRemove(
                     _In_ sai_object_id_t tbl_oid);
+
+            sai_status_t commitAclDeferredMirrorCount(
+                    _In_ sai_object_id_t tbl_oid,
+                    _In_ uint32_t deferred_mirror_count);
 
             sai_status_t AclAddRemoveCheck(
                     _In_ sai_object_id_t tbl_oid);
@@ -748,7 +755,8 @@ namespace saivs
                     _In_ bool table_has_v4,
                     _In_ bool table_has_v6,
                     _Out_ std::list<vpp_acl_rule_t> &acl_rules,
-                    _Out_ std::list<vpp_tunterm_acl_rule_t> &tunterm_acl_rules);
+                    _Out_ std::list<vpp_tunterm_acl_rule_t> &tunterm_acl_rules,
+                    _Out_ uint32_t &deferred_mirror_count);
 
             /**
              * @brief Determines the IP address family/families an ACL table matches on.

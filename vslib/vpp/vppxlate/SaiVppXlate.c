@@ -54,6 +54,9 @@
 #include <vpp_plugins/tunterm_acl/tunterm_acl.api_enum.h>
 #include <vpp_plugins/tunterm_acl/tunterm_acl.api_types.h>
 
+#include <vpp_plugins/sonic_ext/sonic_ext.api_enum.h>
+#include <vpp_plugins/sonic_ext/sonic_ext.api_types.h>
+
 #include <vlibmemory/vlib.api_types.h>
 #include <vlibmemory/memclnt.api_enum.h>
 
@@ -111,6 +114,24 @@
 
 #define vl_api_version(n, v) static u32 tunterm_api_version = v;
 #include <vpp_plugins/tunterm_acl/tunterm_acl.api.h>
+#undef vl_api_version
+
+/* sonic_ext API inclusion */
+
+#define vl_typedefs
+#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
+#undef vl_typedefs
+
+#define vl_endianfun
+#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
+#undef vl_endianfun
+
+#define vl_calcsizefun
+#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
+#undef vl_calcsizefun
+
+#define vl_api_version(n, v) static u32 sonic_ext_api_version = v;
+#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
 #undef vl_api_version
 
 /* interface API inclusion */
@@ -1159,6 +1180,17 @@ vl_api_tunterm_acl_interface_add_del_reply_t_handler(vl_api_tunterm_acl_interfac
 }
 
 static void
+vl_api_sonic_ext_egress_mirror_enable_disable_reply_t_handler(
+    vl_api_sonic_ext_egress_mirror_enable_disable_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+
+    if (retval) { SAIVPP_ERROR("sonic_ext egress mirror feature update failed(%d)", retval); }
+    else { SAIVPP_INFO("sonic_ext egress mirror feature update successful"); }
+}
+
+static void
 vl_api_bond_create_reply_t_handler (vl_api_bond_create_reply_t *msg)
 {
     int retval = (int)ntohl((uint32_t)msg->retval);
@@ -1297,6 +1329,7 @@ static u16 sr_msg_id_base;
 static u16 bond_msg_id_base;
 static u16 span_msg_id_base;
 static u16 gre_msg_id_base;
+static u16 sonic_ext_msg_id_base;
 
 static void vpp_base_vpe_init(void)
 {
@@ -1485,6 +1518,9 @@ vl_api_acl_interface_add_del_reply_t_handler(vl_api_acl_interface_add_del_reply_
 #define SR_MSG_ID(id) \
     (VL_API_##id + sr_msg_id_base)
 
+#define SONIC_EXT_MSG_ID(id) \
+    (VL_API_##id + sonic_ext_msg_id_base)
+
 #define foreach_vpe_plugin_api_reply_msg                                \
     _(LCP_MSG_ID(LCP_ITF_PAIR_ADD_DEL_REPLY), lcp_itf_pair_add_del_reply) \
     _(LCP_MSG_ID(LCP_ETHERTYPE_ENABLE_REPLY), lcp_ethertype_enable_reply) \
@@ -1496,6 +1532,7 @@ vl_api_acl_interface_add_del_reply_t_handler(vl_api_acl_interface_add_del_reply_
     _(TUNTERM_MSG_ID(TUNTERM_ACL_INTERFACE_ADD_DEL_REPLY), tunterm_acl_interface_add_del_reply) \
     _(TUNTERM_MSG_ID(TUNTERM_ACL_DEL_REPLY), tunterm_acl_del_reply) \
     _(TUNTERM_MSG_ID(TUNTERM_ACL_ADD_REPLACE_REPLY), tunterm_acl_add_replace_reply) \
+    _(SONIC_EXT_MSG_ID(SONIC_EXT_EGRESS_MIRROR_ENABLE_DISABLE_REPLY), sonic_ext_egress_mirror_enable_disable_reply) \
     _(SR_MSG_ID(SR_LOCALSID_ADD_DEL_REPLY), sr_localsid_add_del_reply) \
     _(SR_MSG_ID(SR_POLICY_ADD_V2_REPLY), sr_policy_add_v2_reply) \
     _(SR_MSG_ID(SR_POLICY_DEL_REPLY), sr_policy_del_reply) \
@@ -1576,6 +1613,13 @@ static void get_base_msg_id()
     msg_base_lookup_name = format (0, "gre_%08x%c", gre_api_version, 0);
     gre_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
     assert(gre_msg_id_base != (u16) ~0);
+
+    msg_base_lookup_name = format (0, "sonic_ext_%08x%c", sonic_ext_api_version, 0);
+    sonic_ext_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
+    if (sonic_ext_msg_id_base == (u16) ~0) {
+        SAIVPP_ERROR("sonic_ext API is missing; VPP and sairedis builds are incompatible");
+        abort();
+    }
 }
 
 #define API_SOCKET_FILE "/run/vpp/api.sock"
@@ -2364,8 +2408,7 @@ int vpp_acl_add_replace (vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace
         vpp_rule->tcp_flags_mask = in_rule->tcp_flags_mask;
         vpp_rule->tcp_flags_value = in_rule->tcp_flags_value;
         vpp_rule->is_permit = (vl_api_acl_action_t)in_rule->action;
-        vpp_rule->mirror_sw_if_index = htonl(in_rule->mirror_sw_if_index);
-        vpp_rule->mirror_is_egress = in_rule->mirror_is_egress;
+        vpp_rule->mirror_action = htonl(in_rule->mirror_action);
 
         /*
          * Ingress-port restriction (SAI IN_PORT/IN_PORTS) for everflow
@@ -2429,6 +2472,29 @@ int vpp_acl_del (uint32_t acl_index)
 
     M (ACL_DEL, mp);
     mp->acl_index = htonl(acl_index);
+
+    S (mp);
+    WR (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
+int vpp_sonic_ext_egress_mirror_enable_disable(bool enable)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_egress_mirror_enable_disable_t *mp;
+    int ret;
+
+    init_vpp_client();
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_msg_id_base;
+
+    M (SONIC_EXT_EGRESS_MIRROR_ENABLE_DISABLE, mp);
+    mp->enable = enable;
 
     S (mp);
     WR (ret);
