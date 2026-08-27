@@ -393,6 +393,8 @@ namespace saivs
                     _Inout_ sai_object_id_t &bv_id,
                     _Inout_ sai_object_id_t &bridge_port_id);
 
+        protected:
+
             bool getLagFromPort(
                     _In_ sai_object_id_t port_id,
                     _Inout_ sai_object_id_t& lag_id);

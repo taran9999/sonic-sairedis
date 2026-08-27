@@ -368,9 +368,26 @@ sai_status_t SwitchVpp::applyErspanMonitor(
     std::string hwif;
     sai_ip_address_t nh;
 
-    if (monitor_port != SAI_NULL_OBJECT_ID
+    bool resolved =
+        monitor_port != SAI_NULL_OBJECT_ID
         && vpp_get_hwif_name(monitor_port, 0, hwif)
-        && resolveMonitorNexthop(monitor_port, mac, nh))
+        && resolveMonitorNexthop(monitor_port, mac, nh);
+
+    if (!resolved && monitor_port != SAI_NULL_OBJECT_ID)
+    {
+        // LAG uplink: orchagent's MONITOR_PORT is a physical member, but the
+        // nexthop neighbor is learned on the parent PortChannel; resolve and
+        // pin via the bond (BondEthernet<id>) instead of the member port.
+        sai_object_id_t lag_oid = SAI_NULL_OBJECT_ID;
+        if (getLagFromPort(monitor_port, lag_oid)
+            && vpp_get_hwif_name(lag_oid, 0, hwif)
+            && resolveMonitorNexthop(lag_oid, mac, nh))
+        {
+            resolved = true;
+        }
+    }
+
+    if (resolved)
     {
         info.monitor_port = monitor_port;
         info.monitor_hwif = hwif;
