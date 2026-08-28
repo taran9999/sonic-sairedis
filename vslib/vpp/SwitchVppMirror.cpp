@@ -92,15 +92,16 @@ sai_status_t SwitchVpp::createMirrorSession(
         tunnel.type = 2;
         tunnel.session_id = (uint16_t)session_id;
         tunnel.gre_protocol = gre_protocol;
-        // VPP forwards the GRE-encapped packet to the tunnel destination through
-        // one more IP rewrite, which decrements the outer TTL once. Compensate
-        // by adding one so the packet on the wire carries exactly the
-        // session-configured TTL.
-        if (session_ttl > 0 && session_ttl < 255) {
-            tunnel.ttl = (uint8_t)(session_ttl + 1);
-        } else {
-            tunnel.ttl = session_ttl;
-        }
+        // Outer ERSPAN TTL must appear on the wire exactly as configured on the
+        // mirror session. The GRE encap prepends this value from the tunnel
+        // rewrite template; when the tunnel destination resolves via a
+        // directly-attached adjacency (the everflow test topology) the encapped
+        // packet is NOT re-run through ip4-rewrite, so it is delivered without a
+        // decrement. Program the template with the session TTL verbatim. (A
+        // previous "+1" compensation assumed VPP always decrements the outer
+        // once, which only holds for recursively-resolved tunnel destinations
+        // and produced an off-by-one TTL, e.g. 5 instead of 4, on the wire.)
+        tunnel.ttl = session_ttl;
 
         // The GRE tunnel instance drives the greN interface name and its entry
         // in VPP's interface-name hash. Do NOT derive it from session_id: the
