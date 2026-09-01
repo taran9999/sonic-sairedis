@@ -120,11 +120,45 @@ sai_status_t SwitchVpp::createMirrorSession(
 
         uint32_t gre_instance = tunnel.instance;
         uint32_t gre_sw_if_index = 0;
+
+        // Pin the ERSPAN encap to the single stable monitor port that
+        // orchagent's MirrorOrch already resolved for us. MirrorOrch selects
+        // ONE next hop for the mirror destination and passes its egress port
+        // (SAI_MIRROR_SESSION_ATTR_MONITOR_PORT) and neighbor MAC
+        // (SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS), re-pointing them via SET
+        // only when that member leaves the ECMP group. Honor that here by
+        // installing a /32 host route for dst_ip out the monitor port so the
+        // encapped copy egresses one STABLE port, instead of letting VPP hash
+        // the constant outer header over the mirror-dst ECMP load-balance
+        // (which re-shuffles on every membership change). If the monitor port
+        // or its nexthop is not resolvable, fall back to plain FIB forwarding.
+        //
+        // Install the pin BEFORE creating the tunnel so the tunnel's outer L2
+        // midchain stacks on the pinned monitor path at creation time. Adding
+        // the /32 afterwards would rely on a FIB back-walk re-stacking a raw-L2
+        // midchain off the mirror-dst ECMP default, which is not reliable.
+        info.src_ip = tunnel.src;
+        info.dst_ip = tunnel.dst;
+        info.monitor_pinned = false;
+        info.monitor_port = SAI_NULL_OBJECT_ID;
+        const sai_attribute_value_t *mon_value;
+        uint32_t mon_index;
+        const sai_attribute_value_t *mac_value;
+        uint32_t mac_index;
+        if (find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, &mon_value, &mon_index) == SAI_STATUS_SUCCESS
+            && find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS, &mac_value, &mac_index) == SAI_STATUS_SUCCESS)
+        {
+            applyErspanMonitor(info, mon_value->oid, mac_value->mac);
+        }
+
         SWSS_LOG_NOTICE("Creating GRE mirror tunnel: type=%u session_id=%d instance=%u gre_protocol=0x%04x ttl=%u(session_ttl=%u)",
             tunnel.type, session_id, tunnel.instance, gre_protocol, tunnel.ttl, session_ttl);
         int ret = vpp_gre_tunnel_add_del(&tunnel, true, &gre_sw_if_index);
         if(ret != 0) {
             SWSS_LOG_ERROR("Failed to add GRE tunnel for ERSPAN session, ret=%d", ret);
+            if(info.monitor_pinned) {
+                pinErspanMonitor(info, false);
+            }
             m_erspan_session_id_pool.free((uint32_t)session_id);
             return SAI_STATUS_FAILURE;
         }
@@ -143,39 +177,17 @@ sai_status_t SwitchVpp::createMirrorSession(
         if(up_ret != 0) {
             SWSS_LOG_ERROR("Failed to bring up gre tunnel %s (sw_if_index %u), ret=%d", gre_ifname.c_str(), gre_sw_if_index, up_ret);
             vpp_gre_tunnel_add_del(&tunnel, false, &gre_sw_if_index);
+            if(info.monitor_pinned) {
+                pinErspanMonitor(info, false);
+            }
             m_erspan_session_id_pool.free((uint32_t)session_id);
             return SAI_STATUS_FAILURE;
         }
 
         info.sw_if_index = gre_sw_if_index;
         info.is_erspan = true;
-        info.src_ip = tunnel.src;
-        info.dst_ip = tunnel.dst;
         info.session_id = (uint16_t)session_id;
         info.gre_instance = gre_instance;
-
-        // Pin the ERSPAN encap to the single stable monitor port that
-        // orchagent's MirrorOrch already resolved for us. MirrorOrch selects
-        // ONE next hop for the mirror destination and passes its egress port
-        // (SAI_MIRROR_SESSION_ATTR_MONITOR_PORT) and neighbor MAC
-        // (SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS), re-pointing them via SET
-        // only when that member leaves the ECMP group. Honor that here by
-        // installing a /32 host route for dst_ip out the monitor port so the
-        // encapped copy egresses one STABLE port, instead of letting VPP hash
-        // the constant outer header over the mirror-dst ECMP load-balance
-        // (which re-shuffles on every membership change). If the monitor port
-        // or its nexthop is not resolvable, fall back to plain FIB forwarding.
-        info.monitor_pinned = false;
-        info.monitor_port = SAI_NULL_OBJECT_ID;
-        const sai_attribute_value_t *mon_value;
-        uint32_t mon_index;
-        const sai_attribute_value_t *mac_value;
-        uint32_t mac_index;
-        if (find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_MONITOR_PORT, &mon_value, &mon_index) == SAI_STATUS_SUCCESS
-            && find_attrib_in_list(attr_count, attr_list, SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS, &mac_value, &mac_index) == SAI_STATUS_SUCCESS)
-        {
-            applyErspanMonitor(info, mon_value->oid, mac_value->mac);
-        }
     } else {
         SWSS_LOG_ERROR("Unsupported mirror session type %d", mirror_type);
         return SAI_STATUS_FAILURE;
