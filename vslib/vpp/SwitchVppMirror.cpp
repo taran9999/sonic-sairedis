@@ -92,16 +92,10 @@ sai_status_t SwitchVpp::createMirrorSession(
         tunnel.type = 2;
         tunnel.session_id = (uint16_t)session_id;
         tunnel.gre_protocol = gre_protocol;
-        // VPP forwards the GRE-encapped mirror clone to the tunnel destination
-        // through one more IP rewrite, which decrements the outer TTL once.
-        // Compensate by adding one so the packet on the wire carries exactly the
-        // session-configured TTL. NOTE: this +1 is correct for the INGRESS-mirror
-        // (immediate acl-plugin clone) path, which re-enters ip4-rewrite. The
-        // DEFERRED egress-mirror clone (injected at interface-output) is NOT
-        // re-run through ip4-rewrite, so it is delivered without a decrement and
-        // ends up one too high (session_ttl+1); that must be corrected in the VPP
-        // egress-mirror clone path, not here, since a single tunnel template
-        // cannot satisfy both the decrementing and non-decrementing clone paths.
+        // VPP forwards both immediate and deferred GRE-encapped mirror clones
+        // through the tunnel's underlay IP rewrite, which decrements the outer
+        // TTL once. Compensate by adding one so the packet carries exactly the
+        // session-configured TTL after that rewrite.
         if (session_ttl > 0 && session_ttl < 255) {
             tunnel.ttl = (uint8_t)(session_ttl + 1);
         } else {
