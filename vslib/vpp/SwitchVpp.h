@@ -761,12 +761,8 @@ namespace saivs
             /**
              * @brief Determines the IP address family/families an ACL table matches on.
              *
-             * Reads the table's declared match-field bitmap (SAI_ACL_TABLE_ATTR_FIELD_*)
-             * to classify it as IPv4-capable and/or IPv6-capable. Used to give an
-             * address-less rule (e.g. an Everflow mirror rule that only matches on
-             * L4 protocol) the correct IP family, since VPP classifies each ACL rule
-             * as IPv4 or IPv6 based on its prefix and would otherwise default such a
-             * rule to IPv4 and never match IPv6 traffic.
+             * Used to give an address-less rule the correct family, since VPP
+             * classifies a rule as IPv4 or IPv6 from its prefix alone.
              *
              * @param[in] tbl_oid ACL table object ID.
              * @param[out] has_v4 Set true if the table matches on IPv4 fields.
@@ -866,8 +862,11 @@ namespace saivs
             /**
              * @brief Updates an ACE field for a regular VPP ACL rule.
              *
-             * Member function so it can resolve mirror-session OIDs against
-             * m_mirror_sessions for SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_{INGRESS,EGRESS}.
+             * @param[in] attr_id The ID of the SAI attribute to be updated.
+             * @param[in] value Pointer to the SAI attribute value.
+             * @param[out] rule Pointer to the ACL rule to be updated.
+             * @param[inout] in_sw_if_indices Ingress-port match set collected for this ACE.
+             * @return SAI_STATUS_SUCCESS on success, or an appropriate error code otherwise.
              */
             sai_status_t acl_rule_field_update(
                     _In_ sai_acl_entry_attr_t attr_id,
@@ -876,13 +875,16 @@ namespace saivs
                     _Inout_ std::vector<uint32_t>& in_sw_if_indices);
 
             /**
-             * @brief Resolves a port OID to a VPP sw_if_index and appends it to
-             * an ACE's ingress-port match set (IN_PORT/IN_PORTS qualifier).
+             * @brief Resolves a port OID to a VPP sw_if_index and appends it to an
+             * ACE's ingress-port match set (IN_PORT/IN_PORTS qualifier).
              *
-             * Member function so it can resolve the port OID to a hwif name via
-             * vpp_get_hwif_name(). A VPP ACL rule is scoped to at most one
-             * ingress interface, so fill_acl_rules() emits one rule per
-             * collected index; an empty set means "match any ingress port".
+             * A VPP ACL rule is scoped to at most one ingress interface, so
+             * fill_acl_rules() emits one rule per collected index; an empty set
+             * means "match any ingress port".
+             *
+             * @param[in] port_oid The port object ID to resolve.
+             * @param[inout] in_sw_if_indices Ingress-port match set to append to.
+             * @return SAI_STATUS_SUCCESS on success, or an appropriate error code otherwise.
              */
             sai_status_t acl_rule_add_in_port(
                     _In_ sai_object_id_t port_oid,
@@ -1070,13 +1072,9 @@ namespace saivs
 
             BitResourcePool m_erspan_session_id_pool{1024, 0};
 
-            // VPP GRE tunnel "instance" drives the greN interface name and its
-            // registration in VPP's interface-name hash / FIB. It MUST NOT be
-            // reused for the lifetime of the switch: reusing a just-freed
-            // instance makes VPP delete greN and immediately re-add greN while
-            // the previous teardown is still in flight, corrupting the VPP clib
-            // heap. Keep it strictly monotonic and independent of the pooled
-            // (recyclable) 16-bit ERSPAN session_id.
+            // Names the greN interface, so it must never be reused: re-adding greN
+            // while VPP still tears down the old one corrupts its clib heap. Kept
+            // monotonic and independent of the recyclable ERSPAN session_id.
             uint32_t m_next_gre_instance = 0;
 
             struct MirrorSessionInfo {
@@ -1087,15 +1085,8 @@ namespace saivs
                 uint16_t session_id;
                 uint32_t gre_instance; // GRE tunnel instance for erspan
 
-                // ERSPAN single-stable-monitor-port pin. orchagent's MirrorOrch
-                // resolves the ERSPAN destination to ONE next hop and hands us
-                // its egress port (SAI_MIRROR_SESSION_ATTR_MONITOR_PORT) plus the
-                // neighbor MAC (SAI_MIRROR_SESSION_ATTR_DST_MAC_ADDRESS), and
-                // re-points them via SET only when that member leaves the ECMP
-                // group. We honor that by installing a /32 host route for dst_ip
-                // that forwards via the resolved nexthop out the monitor port,
-                // overriding the mirror-dst ECMP load-balance so the encapped
-                // copy egresses one STABLE port.
+                // Pin state for the single monitor port MirrorOrch resolved, applied
+                // as a /32 host route so the encap does not follow mirror-dst ECMP.
                 bool monitor_pinned;          // true once a monitor pin is installed
                 sai_object_id_t monitor_port; // current SAI MONITOR_PORT oid
                 std::string monitor_hwif;     // VPP hwif of the pinned monitor port
@@ -1105,10 +1096,8 @@ namespace saivs
 
             std::map<sai_object_id_t, MirrorSessionInfo> m_mirror_sessions;
 
-            // Monitor-port pin support: port oid -> (neighbor ip string ->
-            // neighbor mac string), maintained from SAI neighbor create/remove.
-            // Used to resolve the ERSPAN monitor port's nexthop IP from
-            // (MONITOR_PORT, DST_MAC).
+            // port oid -> (neighbor ip -> neighbor mac), maintained from SAI neighbor
+            // create/remove; resolves the monitor port's nexthop from DST_MAC.
             std::map<sai_object_id_t, std::map<std::string, std::string>> m_port_neighbor_mac;
 
             struct PortMirrorBinding {
@@ -1122,38 +1111,35 @@ namespace saivs
             std::map<sai_object_id_t, PortMirrorBinding> m_port_mirror_bindings;
 
         protected:
-                sai_status_t createMirrorSession(
-                        _In_ sai_object_id_t object_id,
-                        _In_ sai_object_id_t switch_id,
-                        _In_ uint32_t attr_count,
-                        _In_ const sai_attribute_t *attr_list);
-        
-                sai_status_t removeMirrorSession(_In_ sai_object_id_t object_id);
 
-                sai_status_t setMirrorSession(
-                        _In_ sai_object_id_t object_id,
-                        _In_ const sai_attribute_t *attr);
+            sai_status_t createMirrorSession(
+                    _In_ sai_object_id_t object_id,
+                    _In_ sai_object_id_t switch_id,
+                    _In_ uint32_t attr_count,
+                    _In_ const sai_attribute_t *attr_list);
 
-                // Resolve the ERSPAN monitor port's nexthop IP from
-                // (monitor_port, DST_MAC) using the neighbor index.
-                bool resolveMonitorNexthop(
-                        _In_ sai_object_id_t monitor_port,
-                        _In_ const sai_mac_t mac,
-                        _Out_ sai_ip_address_t &nexthop);
+            sai_status_t removeMirrorSession(
+                    _In_ sai_object_id_t object_id);
 
-                // (Re)compute and install the ERSPAN monitor pin for the given
-                // monitor port + DST_MAC, tearing down any previous pin first.
-                sai_status_t applyErspanMonitor(
-                        _In_ MirrorSessionInfo &info,
-                        _In_ sai_object_id_t monitor_port,
-                        _In_ const sai_mac_t mac);
+            sai_status_t setMirrorSession(
+                    _In_ sai_object_id_t object_id,
+                    _In_ const sai_attribute_t *attr);
 
-                // Install (is_add=true) or remove (is_add=false) the ERSPAN
-                // single-monitor-port pin (a /32 host route for info.dst_ip via
-                // info.monitor_nh out info.monitor_hwif).
-                sai_status_t pinErspanMonitor(
-                        _In_ MirrorSessionInfo &info,
-                        _In_ bool is_add);
+            // Resolves the monitor port's nexthop IP from (monitor_port, DST_MAC).
+            bool resolveMonitorNexthop(
+                    _In_ sai_object_id_t monitor_port,
+                    _In_ const sai_mac_t mac,
+                    _Out_ sai_ip_address_t &nexthop);
 
+            // (Re)computes and installs the monitor pin, tearing down any previous one.
+            sai_status_t applyErspanMonitor(
+                    _In_ MirrorSessionInfo &info,
+                    _In_ sai_object_id_t monitor_port,
+                    _In_ const sai_mac_t mac);
+
+            // Installs or removes the /32 host route implementing the monitor pin.
+            sai_status_t pinErspanMonitor(
+                    _In_ MirrorSessionInfo &info,
+                    _In_ bool is_add);
     };
 }

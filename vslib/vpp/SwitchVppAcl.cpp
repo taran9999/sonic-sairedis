@@ -403,9 +403,9 @@ sai_status_t SwitchVpp::acl_rule_add_in_port(
     }
 
     in_sw_if_indices.push_back((uint32_t) sw_if_index);
-    SWSS_LOG_NOTICE("IN_PORTS: added ingress port %s (hwif %s, sw_if_index %d) to ACL entry (count now %zu)",
-                    sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str(),
-                    sw_if_index, in_sw_if_indices.size());
+    SWSS_LOG_INFO("IN_PORTS: added ingress port %s (hwif %s, sw_if_index %d) to ACL entry (count now %zu)",
+                  sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str(),
+                  sw_if_index, in_sw_if_indices.size());
 
     return SAI_STATUS_SUCCESS;
 }
@@ -523,7 +523,7 @@ sai_status_t SwitchVpp::acl_rule_field_update(
                                "(traffic from all ports may be mirrored)", ports.count);
                 status = SAI_STATUS_FAILURE;
             } else {
-                SWSS_LOG_NOTICE("IN_PORTS qualifier present with %u ingress port(s)", ports.count);
+                SWSS_LOG_INFO("IN_PORTS qualifier present with %u ingress port(s)", ports.count);
                 for (uint32_t i = 0; i < ports.count; i++) {
                     status = acl_rule_add_in_port(ports.list[i], in_sw_if_indices);
                     if (status != SAI_STATUS_SUCCESS) {
@@ -572,10 +572,10 @@ sai_status_t SwitchVpp::acl_rule_field_update(
             rule->action = VPP_ACL_ACTION_PERMIT_MIRROR;
             rule->mirror_action = it->second.sw_if_index |
                 (mirror_flags << VPP_ACL_MIRROR_FLAGS_SHIFT);
-            SWSS_LOG_NOTICE("ACL mirror action set: session %s -> mirror_action 0x%08x stage %s (rule proto so far %d, ingress ports so far %zu)",
-                            sai_serialize_object_id(oid).c_str(), rule->mirror_action,
-                            mirror_flags ? "egress" : "ingress",
-                            rule->proto, in_sw_if_indices.size());
+            SWSS_LOG_INFO("ACL mirror action set: session %s -> mirror_action 0x%08x stage %s (rule proto so far %d, ingress ports so far %zu)",
+                          sai_serialize_object_id(oid).c_str(), rule->mirror_action,
+                          mirror_flags ? "egress" : "ingress",
+                          rule->proto, in_sw_if_indices.size());
         }
         break;
 
@@ -858,14 +858,10 @@ sai_status_t SwitchVpp::get_sorted_aces(
         }
 
         /*
-         * get_max() relies on transfer_list() to copy list-type attribute
-         * values. When the destination attribute is zero-initialised
-         * (calloc), transfer_list() copies the source count but leaves
-         * dst.list = NULL (see meta/SaiSerialize.cpp). For MIRROR_INGRESS /
-         * MIRROR_EGRESS that leaves us with objlist.count > 0 but list ==
-         * NULL, which downstream is (correctly) rejected as "objlist is
-         * empty". Re-fetch those attributes with a pre-allocated backing
-         * buffer so the OID(s) actually land in our struct.
+         * get_max() copies list attributes via transfer_list(), which propagates
+         * the source count but leaves dst.list = NULL when dst.count was 0 on
+         * entry (see meta/SaiSerialize.cpp). Re-fetch the object lists we care
+         * about with a pre-allocated buffer so the OIDs actually land in the ACE.
          */
         for (uint32_t i = 0; i < p_ace->attrs_count; i++) {
             sai_attribute_t *attr = &p_ace->attrs[i];
@@ -892,14 +888,7 @@ sai_status_t SwitchVpp::get_sorted_aces(
             }
         }
 
-        /*
-         * SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS is an aclfield object list and hits
-         * the same transfer_list() NULL-list problem as the mirror actions
-         * above (get_max leaves objlist.count > 0 but list == NULL). Re-fetch it
-         * with a pre-allocated backing buffer so the ingress port OIDs actually
-         * land in our struct; otherwise the per-interface mirror restriction is
-         * silently dropped and traffic from all ports gets mirrored.
-         */
+        /* Same transfer_list() NULL-list caveat as the mirror actions above. */
         for (uint32_t i = 0; i < p_ace->attrs_count; i++) {
             sai_attribute_t *attr = &p_ace->attrs[i];
 
@@ -1000,14 +989,8 @@ void SwitchVpp::acl_table_get_ip_version(
     auto sid = sai_serialize_object_id(tbl_oid);
 
     const uint32_t MAX_TBL_ATTRS = 64;
-    // Zero-initialize the buffer. get_max()/transfer_attributes() copies each
-    // attribute into this array, and for list-valued table attributes
-    // (e.g. bind-point-type list, action-type list, range-type list on a
-    // mirror ACL table) transfer_list() dereferences the destination's
-    // value.*list.list/.count. If left uninitialized those are garbage stack
-    // values and transfer_list() writes through a wild pointer, crashing syncd.
-    // Zeroing forces count==0 so transfer_list() takes the safe no-copy path;
-    // we only read booldata fields here anyway.
+    // Must be zeroed: transfer_list() dereferences the destination's list/count
+    // for list-valued table attributes, and garbage stack values crash syncd.
     sai_attribute_t attrs[MAX_TBL_ATTRS];
     memset(attrs, 0, sizeof(attrs));
     uint32_t count = 0;
@@ -1051,8 +1034,8 @@ void SwitchVpp::acl_table_get_ip_version(
         }
     }
 
-    SWSS_LOG_NOTICE("ACL table %s IP version: has_v4=%d has_v6=%d",
-                    sid.c_str(), has_v4, has_v6);
+    SWSS_LOG_INFO("ACL table %s IP version: has_v4=%d has_v6=%d",
+                  sid.c_str(), has_v4, has_v6);
 }
 
 sai_status_t SwitchVpp::fill_acl_rules(
@@ -1169,44 +1152,29 @@ sai_status_t SwitchVpp::fill_acl_rules(
                 }
             }
 
-            // Bug A diagnostics: surface the fully-built rule so we can confirm
-            // whether a mirror rule (e.g. EVERFLOWV6 ipv6/TCP) was actually
-            // generated, with which protocol, mirror target and ingress-port
-            // restriction. Logged at NOTICE only for mirror rules to avoid noise.
             if (rule.action == VPP_ACL_ACTION_PERMIT_MIRROR) {
-                SWSS_LOG_NOTICE("Mirror ACL rule built (ace index %u, priority %u): proto=%d, "
-                                "src_af=%d, dst_af=%d, mirror_action=0x%08x, ingress_ports=%zu",
-                                ace.index, ace.priority, rule.proto,
-                                rule.src_prefix.sa_family, rule.dst_prefix.sa_family,
-                                rule.mirror_action, in_sw_if_indices.size());
+                SWSS_LOG_INFO("Mirror ACL rule built (ace index %u, priority %u): proto=%d, "
+                              "src_af=%d, dst_af=%d, mirror_action=0x%08x, ingress_ports=%zu",
+                              ace.index, ace.priority, rule.proto,
+                              rule.src_prefix.sa_family, rule.dst_prefix.sa_family,
+                              rule.mirror_action, in_sw_if_indices.size());
                 if ((rule.mirror_action >> VPP_ACL_MIRROR_FLAGS_SHIFT) &
                     VPP_ACL_MIRROR_F_DEFERRED) {
                     deferred_mirror_count++;
                 }
             }
 
-            // Determine the rule's IP family. VPP classifies each ACL rule as
-            // IPv4 or IPv6 from its prefix; a rule with no IP prefix defaults to
-            // IPv4 in vpp_acl_add_replace. An Everflow mirror rule that only
-            // matches on L4 protocol (e.g. EVERFLOWV6 "ip protocol 6") carries no
-            // IP address, so without help it would be emitted as IPv4-only and
-            // never match IPv6 traffic. Use the parent table's declared IP family
-            // to give such an address-less rule the correct family (and, for a
-            // dual-family table, emit both an IPv4 and an IPv6 variant).
+            // VPP classifies a rule's family from its prefix, so an address-less
+            // rule (e.g. an Everflow mirror rule matching only on L4 protocol)
+            // would default to IPv4 and never match IPv6. Fall back to the parent
+            // table's declared family instead.
             bool rule_has_ip_family =
                 (rule.src_prefix.sa_family == AF_INET  || rule.dst_prefix.sa_family == AF_INET ||
                  rule.src_prefix.sa_family == AF_INET6 || rule.dst_prefix.sa_family == AF_INET6);
 
-            // Emit an address-less rule in its table's declared IP family. IPv4
-            // mirroring is programmed in the MIRROR table (SRC_IP/DST_IP/ICMP)
-            // and IPv6 mirroring in the separate MIRRORV6 table
-            // (SRC_IPV6/DST_IPV6/ICMPV6), so each table already covers its own
-            // family and forcing both here would duplicate the rule (and, with
-            // both tables bound to the same ports, mirror packets twice). Only a
-            // mirror table that declares NEITHER family is genuinely
-            // family-ambiguous (a pure port/DSCP "match everything" rule that
-            // VPP would otherwise classify as IPv4-only); emit both variants
-            // only in that case.
+            // IPv4 and IPv6 mirroring live in separate tables (MIRROR / MIRRORV6),
+            // so emitting both families here would duplicate the rule and mirror
+            // twice. Only a mirror table declaring NEITHER family is ambiguous.
             bool is_mirror_rule = (rule.action == VPP_ACL_ACTION_PERMIT_MIRROR);
             bool want_v4 = table_has_v4;
             bool want_v6 = table_has_v6;
@@ -1228,10 +1196,10 @@ sai_status_t SwitchVpp::fill_acl_rules(
                     set_ipv6any_addr_mask(&v6_rule.src_prefix_mask);
                     set_ipv6any_addr_mask(&v6_rule.dst_prefix_mask);
                     family_variants.push_back(v6_rule);
-                    SWSS_LOG_NOTICE("Address-less ACL rule (ace index %u): emitting IPv6 variant "
-                                    "(proto=%d, action=%d, is_mirror=%d, table_has_v4=%d, table_has_v6=%d)",
-                                    ace.index, v6_rule.proto, v6_rule.action,
-                                    is_mirror_rule, table_has_v4, table_has_v6);
+                    SWSS_LOG_INFO("Address-less ACL rule (ace index %u): emitting IPv6 variant "
+                                  "(proto=%d, action=%d, is_mirror=%d, table_has_v4=%d, table_has_v6=%d)",
+                                  ace.index, v6_rule.proto, v6_rule.action,
+                                  is_mirror_rule, table_has_v4, table_has_v6);
                 }
             } else {
                 family_variants.push_back(rule);
@@ -1655,11 +1623,11 @@ sai_status_t SwitchVpp::commitAclDeferredMirrorCount(
     }
 
     bool enable = m_acl_deferred_mirror_count != 0;
-    SWSS_LOG_NOTICE("ACL table %s installed deferred mirror count %u -> %u; "
-                    "aggregate %u, desired feature state %s",
-                    sai_serialize_object_id(tbl_oid).c_str(), previous_count,
-                    deferred_mirror_count, m_acl_deferred_mirror_count,
-                    enable ? "enabled" : "disabled");
+    SWSS_LOG_INFO("ACL table %s installed deferred mirror count %u -> %u; "
+                  "aggregate %u, desired feature state %s",
+                  sai_serialize_object_id(tbl_oid).c_str(), previous_count,
+                  deferred_mirror_count, m_acl_deferred_mirror_count,
+                  enable ? "enabled" : "disabled");
 
     if (enable == m_acl_egress_mirror_feature_enabled) {
         return SAI_STATUS_SUCCESS;
@@ -1674,6 +1642,8 @@ sai_status_t SwitchVpp::commitAclDeferredMirrorCount(
     }
 
     m_acl_egress_mirror_feature_enabled = enable;
+    SWSS_LOG_NOTICE("sonic_ext egress mirror feature %s (aggregate deferred mirror count %u)",
+                    enable ? "enabled" : "disabled", m_acl_deferred_mirror_count);
     return SAI_STATUS_SUCCESS;
 }
 

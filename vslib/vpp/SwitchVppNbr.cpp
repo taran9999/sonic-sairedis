@@ -95,8 +95,7 @@ sai_status_t SwitchVpp::addRemoveIpNbr(
         return SAI_STATUS_FAILURE;
     }
 
-    // Maintain the port -> (neighbor ip -> neighbor mac) index used to resolve
-    // an ERSPAN mirror monitor port's nexthop IP from (MONITOR_PORT, DST_MAC).
+    // Index used to resolve an ERSPAN monitor port's nexthop IP from its DST_MAC.
     {
         auto nbrIpStr = sai_serialize_ip_address(nbr_entry.ip_address);
         if (is_add)

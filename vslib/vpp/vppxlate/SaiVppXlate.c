@@ -383,10 +383,6 @@
 #include <vpp_plugins/gre/gre.api.h>
 #undef vl_endianfun
 
-// #define vl_printfun
-// #include <vpp_plugins/gre/gre.api.h>
-// #undef vl_printfun
-
 #define vl_calcsizefun
 #include <vpp_plugins/gre/gre.api.h>
 #undef vl_calcsizefun
@@ -405,12 +401,10 @@ do {                                                            \
     socket_client_main_t *scm = vam->socket_client_main;	\
     vam->result_ready = 0;                                      \
     if (scm && scm->socket_enable) {                            \
-      /* The VPP client allocates a fixed-size (default 4096 byte) socket \
-         TX buffer at connect time, and vl_socket_client_msg_alloc() only \
-         does vec_set_len() without reallocating. A large variable-length \
-         message (e.g. ACL add-replace carrying many rules) would exceed  \
-         that capacity and overflow into the adjacent heap, corrupting it \
-         and crashing syncd. Grow the TX buffer to fit this message. */   \
+      /* vl_socket_client_msg_alloc() only vec_set_len()s the fixed-size TX   \
+         buffer allocated at connect time, so a large variable-length message \
+         (e.g. an ACL add-replace with many rules) would overflow into the    \
+         adjacent heap. Grow the buffer to fit this message first. */         \
       vec_validate (scm->socket_tx_buffer, (uword)(sizeof(*mp) + n) - 1); \
       mp = vl_socket_client_msg_alloc ((int)(sizeof(*mp) + n));        \
     } else                                                      \
@@ -2430,7 +2424,6 @@ int vpp_acl_add_replace (vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace
             }
         }
 
-
         SAIVPP_INFO("VPP Rule %u: proto: %u, "
                      "srcport/icmptype: %u-%u, dstport/icmpcode: %u-%u, "
                      "tcp_flags: mask=0x%x, value=0x%x, action: %s",
@@ -2880,10 +2873,8 @@ int interface_set_state (const char *hwif_name, bool is_up)
 }
 
 /*
- * Set admin state of an interface directly by its sw_if_index. This avoids the
- * name->index lookup (get_swif_idx) that relies on the interface-name hash, and
- * therefore lets callers who already know the index skip refresh_interfaces_list()
- * and its costly teardown/rebuild of the global interface-name hashes.
+ * Set admin state by sw_if_index, skipping the name lookup that would otherwise
+ * require refresh_interfaces_list() and its rebuild of the interface-name hashes.
  */
 int interface_set_state_by_index (uint32_t sw_if_index, bool is_up)
 {
