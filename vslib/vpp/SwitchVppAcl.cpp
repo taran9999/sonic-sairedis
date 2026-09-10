@@ -373,14 +373,14 @@ sai_status_t SwitchVpp::acl_rule_add_in_port(
 
     std::string hwif_name;
     if (!vpp_get_hwif_name(port_oid, 0, hwif_name)) {
-        SWSS_LOG_ERROR("IN_PORTS: hwif name not found for port %s; ingress-port match will be incomplete",
+        SWSS_LOG_ERROR("IN_PORTS: hwif name not found for port %s",
                        sai_serialize_object_id(port_oid).c_str());
         return SAI_STATUS_FAILURE;
     }
 
     int sw_if_index = get_sw_if_idx(hwif_name.c_str());
     if (sw_if_index < 0) {
-        SWSS_LOG_ERROR("IN_PORTS: sw_if_index not found for hwif %s (port %s); ingress-port match will be incomplete",
+        SWSS_LOG_ERROR("IN_PORTS: sw_if_index not found for hwif %s (port %s)",
                        hwif_name.c_str(), sai_serialize_object_id(port_oid).c_str());
         return SAI_STATUS_FAILURE;
     }
@@ -519,8 +519,7 @@ sai_status_t SwitchVpp::acl_rule_field_update(
         if (value->aclfield.enable) {
             const sai_object_list_t &ports = value->aclfield.data.objlist;
             if (ports.list == NULL) {
-                SWSS_LOG_ERROR("IN_PORTS objlist is NULL (count=%u); ingress-port match will NOT be honored "
-                               "(traffic from all ports may be mirrored)", ports.count);
+                SWSS_LOG_ERROR("IN_PORTS objlist is NULL (count=%u)", ports.count);
                 status = SAI_STATUS_FAILURE;
             } else {
                 SWSS_LOG_INFO("IN_PORTS qualifier present with %u ingress port(s)", ports.count);
@@ -1129,7 +1128,10 @@ sai_status_t SwitchVpp::fill_acl_rules(
                                                    in_sw_if_indices);
 
                     if (status != SAI_STATUS_SUCCESS) {
-                        SWSS_LOG_ERROR("Failed to fill acl rule, status: %d", status);
+                        SWSS_LOG_ERROR("Failed to translate attr %d of ACL entry %s (ace index %u, "
+                                       "priority %u), status: %d; aborting the whole table update",
+                                       attr->id, sai_serialize_object_id(ace.ace_oid).c_str(),
+                                       ace.index, ace.priority, status);
                         return SAI_STATUS_FAILURE;
                     }
 
@@ -1520,9 +1522,16 @@ sai_status_t SwitchVpp::AclTblConfig(
     acl_table_get_ip_version(tbl_oid, table_has_v4, table_has_v6);
 
     // Fill ACL rules - this returns converted rule lists
-    CHECK_STATUS_ACLTBLCONFIG(fill_acl_rules(aces, ordered_aces, table_has_v4, table_has_v6,
-                                             acl_rules, tunterm_acl_rules,
-                                             deferred_mirror_count));
+    sai_status_t fill_status = fill_acl_rules(aces, ordered_aces, table_has_v4, table_has_v6,
+                                              acl_rules, tunterm_acl_rules,
+                                              deferred_mirror_count);
+    if (fill_status != SAI_STATUS_SUCCESS) {
+        SWSS_LOG_ERROR("ACL table %s not reprogrammed: rule translation failed (%s); previously "
+                       "installed rules and deferred mirror count are retained",
+                       sai_serialize_object_id(tbl_oid).c_str(),
+                       sai_serialize_status(fill_status).c_str());
+    }
+    CHECK_STATUS_ACLTBLCONFIG(fill_status);
 
     SWSS_LOG_INFO("Generated %ld regular ACL rules and %ld tunterm ACL rules",
                     acl_rules.size(), tunterm_acl_rules.size());
@@ -1832,6 +1841,14 @@ sai_status_t SwitchVpp::AclTblRemove(
 
     status = tunterm_acl_delete(tbl_oid, true);
 
+    // The table is already gone from the SAI DB, so this is the last chance to drop
+    // its contribution to the aggregate deferred mirror count.
+    sai_status_t count_status = commitAclDeferredMirrorCount(tbl_oid, 0);
+    if (count_status != SAI_STATUS_SUCCESS) {
+        SWSS_LOG_ERROR("Failed to clear deferred mirror count for removed ACL table %s",
+                       sai_serialize_object_id(tbl_oid).c_str());
+    }
+
     auto vpp_idx_it = m_acl_swindex_map.find(tbl_oid);
     if (vpp_idx_it == m_acl_swindex_map.end()) {
         SWSS_LOG_WARN("No ACL configured for table %s", sai_serialize_object_id(tbl_oid).c_str());
@@ -1843,11 +1860,6 @@ sai_status_t SwitchVpp::AclTblRemove(
 
     if (status == SAI_STATUS_SUCCESS) {
         m_acl_swindex_map.erase(vpp_idx_it);
-        status = commitAclDeferredMirrorCount(tbl_oid, 0);
-    } else {
-        SWSS_LOG_ERROR("ACL table %s delete failed; installed deferred mirror "
-                       "count remains unchanged",
-                       sai_serialize_object_id(tbl_oid).c_str());
     }
     SWSS_LOG_NOTICE("ACL table %s remove swindex %u status %d",
                     sai_serialize_object_id(tbl_oid).c_str(), acl_swindex, status);

@@ -95,7 +95,16 @@ sai_status_t SwitchVpp::addRemoveIpNbr(
         return SAI_STATUS_FAILURE;
     }
 
+    std::string hwif_name;
+    bool found = vpp_get_hwif_name(port_oid, vlan_id, hwif_name);
+    if (found == false)
+    {
+        SWSS_LOG_ERROR("hw interface for port/lag id %s not found", serializedObjectId.c_str());
+        return SAI_STATUS_FAILURE;
+    }
+
     // Index used to resolve an ERSPAN monitor port's nexthop IP from its DST_MAC.
+    // Kept below the guards above so it only tracks neighbors we actually program.
     {
         auto nbrIpStr = sai_serialize_ip_address(nbr_entry.ip_address);
         if (is_add)
@@ -114,14 +123,6 @@ sai_status_t SwitchVpp::addRemoveIpNbr(
                 }
             }
         }
-    }
-
-    std::string hwif_name;
-    bool found = vpp_get_hwif_name(port_oid, vlan_id, hwif_name);
-    if (found == false)
-    {
-        SWSS_LOG_ERROR("hw interface for port/lag id %s not found", serializedObjectId.c_str());
-        return SAI_STATUS_FAILURE;
     }
 
     const char *vpp_ifname = hwif_name.c_str();
