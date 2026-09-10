@@ -64,16 +64,20 @@ extern "C" {
     } vpp_acl_action_e;
 
 /*
- * Maximum number of ingress interfaces that can be attached to a single ACL
- * rule via the SAI_ACL_ENTRY_ATTR_FIELD_IN_PORT(S) qualifier. Used by everflow
- * per-interface mirroring to restrict which ingress ports a mirror rule applies
- * to.
+ * Packed mirror action carried on a PERMIT_MIRROR rule: destination
+ * sw_if_index in bits 27:0, action flags in bits 31:28.
  */
-#define VPP_ACL_MAX_IN_PORTS 64
 #define VPP_ACL_MIRROR_SW_IF_INDEX_MASK 0x0fffffffU
 #define VPP_ACL_MIRROR_FLAGS_SHIFT 28
 #define VPP_ACL_MIRROR_F_DEFERRED (1U << 0)
 #define VPP_ACL_MIRROR_FLAGS_MASK 0xfU
+
+/*
+ * The acl plugin matches only the low 16 bits of the ingress interface
+ * (fa_5tuple_t::l4.lsb_of_sw_if_index), so it rejects an acl_add_replace
+ * carrying a larger index rather than matching the wrong interface.
+ */
+#define VPP_ACL_MAX_IN_SW_IF_INDEX 0xffffU
 
 #ifdef __cplusplus
 static_assert((VPP_ACL_MIRROR_SW_IF_INDEX_MASK |
@@ -102,14 +106,11 @@ _Static_assert((VPP_ACL_MIRROR_SW_IF_INDEX_MASK |
         uint8_t tcp_flags_value;
         uint32_t mirror_action;
         /*
-         * Ingress-port match set (VPP sw_if_index values) from the SAI
-         * IN_PORT/IN_PORTS qualifier. in_ports_count == 0 means "match any
-         * ingress port" (the default, current behavior). When non-zero the
-         * rule should only match/mirror traffic ingressing on one of the
-         * listed interfaces.
+         * Ingress interface this rule is scoped to (VPP sw_if_index), from the
+         * SAI IN_PORT/IN_PORTS qualifier. 0 means "match any ingress port".
+         * SAI IN_PORTS is a list, so the caller emits one rule per port.
          */
-        uint32_t in_ports_count;
-        uint32_t in_ports[VPP_ACL_MAX_IN_PORTS];
+        uint32_t in_sw_if_index;
     } vpp_acl_rule_t;
 
     typedef struct _vpp_acl_ {

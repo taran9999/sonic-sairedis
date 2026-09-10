@@ -367,7 +367,7 @@ static void acl_rule_set_action(
 
 sai_status_t SwitchVpp::acl_rule_add_in_port(
     _In_ sai_object_id_t port_oid,
-    _Out_ vpp_acl_rule_t *rule)
+    _Inout_ std::vector<uint32_t>& in_sw_if_indices)
 {
     SWSS_LOG_ENTER();
 
@@ -385,16 +385,27 @@ sai_status_t SwitchVpp::acl_rule_add_in_port(
         return SAI_STATUS_FAILURE;
     }
 
-    if (rule->in_ports_count >= VPP_ACL_MAX_IN_PORTS) {
-        SWSS_LOG_ERROR("IN_PORTS: exceeded max %d ingress ports; dropping port %s (hwif %s)",
-                       VPP_ACL_MAX_IN_PORTS, sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str());
+    // sw_if_index 0 is local0 and is the acl plugin's "match any ingress port"
+    // value, so a real port resolving to it would silently widen the rule.
+    if (sw_if_index == 0) {
+        SWSS_LOG_ERROR("IN_PORTS: port %s (hwif %s) resolved to sw_if_index 0, which the acl "
+                       "plugin treats as 'any ingress port'; refusing to scope the rule",
+                       sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str());
         return SAI_STATUS_FAILURE;
     }
 
-    rule->in_ports[rule->in_ports_count++] = (uint32_t) sw_if_index;
-    SWSS_LOG_NOTICE("IN_PORTS: added ingress port %s (hwif %s, sw_if_index %d) to ACL rule (count now %u)",
+    if ((uint32_t) sw_if_index > VPP_ACL_MAX_IN_SW_IF_INDEX) {
+        SWSS_LOG_ERROR("IN_PORTS: port %s (hwif %s) sw_if_index %d exceeds the %u the acl plugin "
+                       "can match; refusing to scope the rule",
+                       sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str(),
+                       sw_if_index, (uint32_t) VPP_ACL_MAX_IN_SW_IF_INDEX);
+        return SAI_STATUS_FAILURE;
+    }
+
+    in_sw_if_indices.push_back((uint32_t) sw_if_index);
+    SWSS_LOG_NOTICE("IN_PORTS: added ingress port %s (hwif %s, sw_if_index %d) to ACL entry (count now %zu)",
                     sai_serialize_object_id(port_oid).c_str(), hwif_name.c_str(),
-                    sw_if_index, rule->in_ports_count);
+                    sw_if_index, in_sw_if_indices.size());
 
     return SAI_STATUS_SUCCESS;
 }
@@ -402,7 +413,8 @@ sai_status_t SwitchVpp::acl_rule_add_in_port(
 sai_status_t SwitchVpp::acl_rule_field_update(
     _In_ sai_acl_entry_attr_t          attr_id,
     _In_ const sai_attribute_value_t  *value,
-    _Out_ vpp_acl_rule_t      *rule)
+    _Out_ vpp_acl_rule_t      *rule,
+    _Inout_ std::vector<uint32_t>&     in_sw_if_indices)
 {
     SWSS_LOG_ENTER();
 
@@ -497,13 +509,13 @@ sai_status_t SwitchVpp::acl_rule_field_update(
     case SAI_ACL_ENTRY_ATTR_FIELD_IN_PORT:
         // Single ingress-port qualifier (everflow per-interface mirroring).
         if (value->aclfield.enable) {
-            status = acl_rule_add_in_port(value->aclfield.data.oid, rule);
+            status = acl_rule_add_in_port(value->aclfield.data.oid, in_sw_if_indices);
         }
         break;
 
     case SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS:
         // Ingress-port-list qualifier (everflow per-interface mirroring). The
-        // mirror rule should only apply to traffic ingressing on these ports.
+        // rule should only apply to traffic ingressing on these ports.
         if (value->aclfield.enable) {
             const sai_object_list_t &ports = value->aclfield.data.objlist;
             if (ports.list == NULL) {
@@ -513,7 +525,7 @@ sai_status_t SwitchVpp::acl_rule_field_update(
             } else {
                 SWSS_LOG_NOTICE("IN_PORTS qualifier present with %u ingress port(s)", ports.count);
                 for (uint32_t i = 0; i < ports.count; i++) {
-                    status = acl_rule_add_in_port(ports.list[i], rule);
+                    status = acl_rule_add_in_port(ports.list[i], in_sw_if_indices);
                     if (status != SAI_STATUS_SUCCESS) {
                         break;
                     }
@@ -560,10 +572,10 @@ sai_status_t SwitchVpp::acl_rule_field_update(
             rule->action = VPP_ACL_ACTION_PERMIT_MIRROR;
             rule->mirror_action = it->second.sw_if_index |
                 (mirror_flags << VPP_ACL_MIRROR_FLAGS_SHIFT);
-            SWSS_LOG_NOTICE("ACL mirror action set: session %s -> mirror_action 0x%08x stage %s (rule proto so far %d, in_ports_count %u)",
+            SWSS_LOG_NOTICE("ACL mirror action set: session %s -> mirror_action 0x%08x stage %s (rule proto so far %d, ingress ports so far %zu)",
                             sai_serialize_object_id(oid).c_str(), rule->mirror_action,
                             mirror_flags ? "egress" : "ingress",
-                            rule->proto, rule->in_ports_count);
+                            rule->proto, in_sw_if_indices.size());
         }
         break;
 
@@ -1099,6 +1111,10 @@ sai_status_t SwitchVpp::fill_acl_rules(
             // Process regular ACL rule(s)
             vpp_acl_rule_t rule = {};
             uint8_t port_proto = 0;  // Track if port-related fields were set
+            // A VPP ACL rule is scoped to at most one ingress interface, so the
+            // SAI IN_PORT/IN_PORTS list is collected here and expanded into one
+            // rule per port below. Empty => match any ingress port.
+            std::vector<uint32_t> in_sw_if_indices;
 
             // Record the base index for this ACE
             ace.vpp_rule_base_index = acl_rule_index;
@@ -1126,7 +1142,8 @@ sai_status_t SwitchVpp::fill_acl_rules(
                         port_proto = 1;
                     }
                 } else {
-                    status = acl_rule_field_update((sai_acl_entry_attr_t) attr->id, &attr->value, &rule);
+                    status = acl_rule_field_update((sai_acl_entry_attr_t) attr->id, &attr->value, &rule,
+                                                   in_sw_if_indices);
 
                     if (status != SAI_STATUS_SUCCESS) {
                         SWSS_LOG_ERROR("Failed to fill acl rule, status: %d", status);
@@ -1158,10 +1175,10 @@ sai_status_t SwitchVpp::fill_acl_rules(
             // restriction. Logged at NOTICE only for mirror rules to avoid noise.
             if (rule.action == VPP_ACL_ACTION_PERMIT_MIRROR) {
                 SWSS_LOG_NOTICE("Mirror ACL rule built (ace index %u, priority %u): proto=%d, "
-                                "src_af=%d, dst_af=%d, mirror_action=0x%08x, in_ports_count=%u",
+                                "src_af=%d, dst_af=%d, mirror_action=0x%08x, ingress_ports=%zu",
                                 ace.index, ace.priority, rule.proto,
                                 rule.src_prefix.sa_family, rule.dst_prefix.sa_family,
-                                rule.mirror_action, rule.in_ports_count);
+                                rule.mirror_action, in_sw_if_indices.size());
                 if ((rule.mirror_action >> VPP_ACL_MIRROR_FLAGS_SHIFT) &
                     VPP_ACL_MIRROR_F_DEFERRED) {
                     deferred_mirror_count++;
@@ -1220,27 +1237,50 @@ sai_status_t SwitchVpp::fill_acl_rules(
                 family_variants.push_back(rule);
             }
 
+            // A VPP ACL rule carries at most one ingress interface, so a SAI
+            // entry qualified with N ingress ports becomes N rules. An empty set
+            // leaves in_sw_if_index 0, which the acl plugin treats as "any".
+            std::vector<uint32_t> in_port_variants;
+            if (in_sw_if_indices.empty()) {
+                in_port_variants.push_back(0);
+            } else {
+                in_port_variants = in_sw_if_indices;
+            }
+
+            if (in_port_variants.size() * family_variants.size() >
+                (size_t) ACL_MAX_RULES_PER_ACE) {
+                SWSS_LOG_WARN("ACE index %u expands to %zu rules (%zu ingress port(s) x %zu family "
+                              "variant(s)); large expansions grow the acl_add_replace message",
+                              ace.index, in_port_variants.size() * family_variants.size(),
+                              in_port_variants.size(), family_variants.size());
+            }
+
             // If port/port_range is set but protocol is not set, create 2 rules
             // (UDP and TCP) per family variant.
-            for (auto &fr : family_variants) {
-                if (port_proto && fr.proto == 0) {
-                    // Create UDP rule
-                    vpp_acl_rule_t udp_rule = fr;
-                    udp_rule.proto = IPPROTO_UDP;
-                    acl_rules.push_back(udp_rule);
-                    rules_added++;
-                    SWSS_LOG_INFO("Added UDP rule for port-based ACL entry");
+            for (auto &fv : family_variants) {
+                for (uint32_t in_sw_if_index : in_port_variants) {
+                    vpp_acl_rule_t fr = fv;
+                    fr.in_sw_if_index = in_sw_if_index;
 
-                    // Create TCP rule
-                    vpp_acl_rule_t tcp_rule = fr;
-                    tcp_rule.proto = IPPROTO_TCP;
-                    acl_rules.push_back(tcp_rule);
-                    rules_added++;
-                    SWSS_LOG_INFO("Added TCP rule for port-based ACL entry");
-                } else {
-                    // Add the single rule
-                    acl_rules.push_back(fr);
-                    rules_added++;
+                    if (port_proto && fr.proto == 0) {
+                        // Create UDP rule
+                        vpp_acl_rule_t udp_rule = fr;
+                        udp_rule.proto = IPPROTO_UDP;
+                        acl_rules.push_back(udp_rule);
+                        rules_added++;
+                        SWSS_LOG_INFO("Added UDP rule for port-based ACL entry");
+
+                        // Create TCP rule
+                        vpp_acl_rule_t tcp_rule = fr;
+                        tcp_rule.proto = IPPROTO_TCP;
+                        acl_rules.push_back(tcp_rule);
+                        rules_added++;
+                        SWSS_LOG_INFO("Added TCP rule for port-based ACL entry");
+                    } else {
+                        // Add the single rule
+                        acl_rules.push_back(fr);
+                        rules_added++;
+                    }
                 }
             }
 
@@ -1777,12 +1817,15 @@ sai_status_t SwitchVpp::aclDefaultCreate()
 
     vpp_acl_rule_t *rule = &acl->rules[0];
 
-    acl_rule_field_update((sai_acl_entry_attr_t) attr[0].id, &attr[0].value, rule);
+    // The default permit ACL carries no ingress-port scope.
+    std::vector<uint32_t> no_in_ports;
+
+    acl_rule_field_update((sai_acl_entry_attr_t) attr[0].id, &attr[0].value, rule, no_in_ports);
     rule->action = VPP_ACL_ACTION_API_PERMIT;
 
     rule = &acl->rules[1];
 
-    acl_rule_field_update((sai_acl_entry_attr_t) attr[1].id, &attr[1].value, rule);
+    acl_rule_field_update((sai_acl_entry_attr_t) attr[1].id, &attr[1].value, rule, no_in_ports);
     rule->action = VPP_ACL_ACTION_API_PERMIT;
 
     sai_status_t status;

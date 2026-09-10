@@ -16,10 +16,17 @@ extern "C" {
 
 /*
  * Maximum number of ingress port OIDs we re-fetch for a single ACL entry's
- * SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS qualifier. Kept in sync with
- * VPP_ACL_MAX_IN_PORTS so a fully populated list survives the re-fetch.
+ * SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS qualifier.
  */
 #define MAX_ACL_IN_PORTS 64
+
+/*
+ * A VPP ACL rule is scoped to one ingress interface and one IP family, so a
+ * single SAI entry can expand into (ingress ports x families x L4 protocols)
+ * rules. Past this many we log a warning: the expansion is legal but grows the
+ * acl_add_replace message.
+ */
+#define ACL_MAX_RULES_PER_ACE 64
 
 typedef struct _acl_tbl_entries_ {
     uint32_t priority;

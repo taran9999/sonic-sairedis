@@ -872,19 +872,21 @@ namespace saivs
             sai_status_t acl_rule_field_update(
                     _In_ sai_acl_entry_attr_t attr_id,
                     _In_ const sai_attribute_value_t *value,
-                    _Out_ vpp_acl_rule_t *rule);
+                    _Out_ vpp_acl_rule_t *rule,
+                    _Inout_ std::vector<uint32_t>& in_sw_if_indices);
 
             /**
              * @brief Resolves a port OID to a VPP sw_if_index and appends it to
-             * an ACL rule's ingress-port match set (IN_PORT/IN_PORTS qualifier).
+             * an ACE's ingress-port match set (IN_PORT/IN_PORTS qualifier).
              *
              * Member function so it can resolve the port OID to a hwif name via
-             * vpp_get_hwif_name(). in_ports_count == 0 on the rule means "match
-             * any ingress port".
+             * vpp_get_hwif_name(). A VPP ACL rule is scoped to at most one
+             * ingress interface, so fill_acl_rules() emits one rule per
+             * collected index; an empty set means "match any ingress port".
              */
             sai_status_t acl_rule_add_in_port(
                     _In_ sai_object_id_t port_oid,
-                    _Out_ vpp_acl_rule_t *rule);
+                    _Inout_ std::vector<uint32_t>& in_sw_if_indices);
 
             /**
              * @brief Binds or unbinds a tunnel termination ACL table to/from an interface.

@@ -2411,27 +2411,22 @@ int vpp_acl_add_replace (vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace
         vpp_rule->mirror_action = htonl(in_rule->mirror_action);
 
         /*
-         * Ingress-port restriction (SAI IN_PORT/IN_PORTS) for everflow
-         * per-interface mirroring. in_ports_count == 0 means "match any ingress
-         * port". The VPP acl plugin (patch 0015) clones only when the packet's
-         * RX sw_if_index is in mirror_in_ports[0..mirror_n_in_ports).
+         * Ingress-interface scope (SAI IN_PORT/IN_PORTS). 0 means "match any
+         * ingress port". A too-large index makes VPP reject the whole
+         * acl_add_replace, so drop the scope here and log the offending rule
+         * instead of losing every rule in the ACL.
          */
-        {
-            uint32_t n_in_ports = in_rule->in_ports_count;
-            if (n_in_ports > VPP_ACL_MAX_IN_PORTS) {
-                SAIVPP_ERROR("VPP Rule %u: IN_PORTS count %u exceeds max %u; truncating",
-                             idx, n_in_ports, (uint32_t)VPP_ACL_MAX_IN_PORTS);
-                n_in_ports = VPP_ACL_MAX_IN_PORTS;
-            }
-            vpp_rule->mirror_n_in_ports = htonl(n_in_ports);
-            for (uint32_t p = 0; p < n_in_ports; p++) {
-                vpp_rule->mirror_in_ports[p] = htonl(in_rule->in_ports[p]);
-                SAIVPP_INFO("VPP Rule %u: IN_PORTS[%u] = sw_if_index %u",
-                            idx, p, in_rule->in_ports[p]);
-            }
-            if (n_in_ports > 0) {
-                SAIVPP_INFO("VPP Rule %u: ingress-port mirror restriction with %u port(s)",
-                            idx, n_in_ports);
+        if (in_rule->in_sw_if_index > VPP_ACL_MAX_IN_SW_IF_INDEX) {
+            SAIVPP_ERROR("VPP Rule %u: ingress sw_if_index %u exceeds max %u; "
+                         "emitting rule without ingress-port scope",
+                         idx, in_rule->in_sw_if_index,
+                         (uint32_t)VPP_ACL_MAX_IN_SW_IF_INDEX);
+            vpp_rule->in_sw_if_index = 0;
+        } else {
+            vpp_rule->in_sw_if_index = htonl(in_rule->in_sw_if_index);
+            if (in_rule->in_sw_if_index != 0) {
+                SAIVPP_INFO("VPP Rule %u: scoped to ingress sw_if_index %u",
+                            idx, in_rule->in_sw_if_index);
             }
         }
 
