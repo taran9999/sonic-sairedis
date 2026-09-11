@@ -46,6 +46,7 @@ libSyncd_a_SOURCES = \
 				SaiObj.cpp \
 				SaiSwitch.cpp \
 				SaiSwitchInterface.cpp \
+				SelectablesTracker.cpp \
 				ServiceMethodTable.cpp \
 				SingleReiniter.cpp \
 				SwitchNotifications.cpp \
@@ -59,6 +60,7 @@ libSyncd_a_SOURCES = \
 				WatchdogScope.cpp \
 				Workaround.cpp \
 				ZeroMQNotificationProducer.cpp \
+				ZmqRedisClient.cpp \
 				syncd_main.cpp
 
 libSyncd_a_CPPFLAGS = $(CODE_COVERAGE_CPPFLAGS)

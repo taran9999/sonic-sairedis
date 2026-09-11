@@ -92,7 +92,8 @@ sai_status_t TunnelManagerSRv6::fill_next_hop(
         vlan_idx = 0;
     }
 
-    if(!m_switch_db->vpp_get_hwif_name(port_oid, vlan_idx, hwif_name)) {
+    hwif_name = m_switch_db->getInterfaceRegistry().resolveHwIfName(port_oid, vlan_idx);
+    if(hwif_name.empty()) {
         SWSS_LOG_WARN("VPP hwif name not found for port %s", sai_serialize_object_id(port_oid).c_str());
         return SAI_STATUS_FAILURE;
     }
@@ -112,6 +113,11 @@ sai_status_t TunnelManagerSRv6::fill_my_sid_entry(
     sai_my_sid_entry_t my_sid_entry;
 
     sai_deserialize_my_sid_entry(my_sid_obj->get_id(), my_sid_entry);
+
+    my_sid.locator_block_len = my_sid_entry.locator_block_len;
+    my_sid.locator_node_len = my_sid_entry.locator_node_len;
+    my_sid.function_len = my_sid_entry.function_len;
+    my_sid.args_len = my_sid_entry.args_len;
 
     struct sockaddr_in6 *sin6 =  &my_sid.localsid.addr.ip6;
     my_sid.localsid.sa_family = AF_INET6;
@@ -554,4 +560,3 @@ sai_status_t TunnelManagerSRv6::remove_sidlist_route_entry(
 
     return status;
 }
-

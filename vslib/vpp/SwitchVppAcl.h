@@ -4,7 +4,12 @@
 extern "C" {
 #endif
 
-#define MAX_ACL_ATTRS 12
+/*
+ * Cap on the attributes read back per ACL entry. The attribute store is keyed
+ * by attribute name, so an entry above the cap loses attributes in name order,
+ * PRIORITY and TABLE_ID first. Keep it above the widest entry orchagent builds.
+ */
+#define MAX_ACL_ATTRS 20
 
 /*
  * SAI HLD restricts SAI_ACL_ENTRY_ATTR_ACTION_MIRROR_{INGRESS,EGRESS} to a single
@@ -13,16 +18,12 @@ extern "C" {
  */
 #define MAX_ACL_MIRROR_OIDS 4
 
-/* Ingress port OIDs re-fetched per SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS qualifier. */
-#define MAX_ACL_IN_PORTS 64
-
 /*
- * A VPP ACL rule is scoped to one ingress interface and one IP family, so one SAI
- * entry expands into (ingress ports x families x L4 protocols) rules. Past this
- * many we warn: the expansion is legal but grows the acl_add_replace message.
+ * One SAI entry expands into (ingress ports x IP families x L4 protocols) VPP
+ * rules. Past this many we warn: the expansion is legal but grows the
+ * acl_add_replace message.
  */
 #define ACL_MAX_RULES_PER_ACE 64
-
 typedef struct _acl_tbl_entries_ {
     uint32_t priority;
 
@@ -36,13 +37,12 @@ typedef struct _acl_tbl_entries_ {
     uint32_t attrs_count;
 
     /*
-     * Backing storage for the MIRROR_INGRESS / MIRROR_EGRESS and IN_PORTS object
-     * lists. get_max() copies through transfer_list(), which leaves dst.list = NULL
+     * Backing storage for the MIRROR_INGRESS / MIRROR_EGRESS object lists.
+     * get_max() copies through transfer_list(), which leaves dst.list = NULL
      * when dst.count was 0 on entry, so these are re-fetched into sized buffers.
      */
     sai_object_id_t mirror_ingress_objid_list[MAX_ACL_MIRROR_OIDS];
     sai_object_id_t mirror_egress_objid_list[MAX_ACL_MIRROR_OIDS];
-    sai_object_id_t in_ports_objid_list[MAX_ACL_IN_PORTS];
 } acl_tbl_entries_t;
 
 typedef struct ordered_ace_list_ {
