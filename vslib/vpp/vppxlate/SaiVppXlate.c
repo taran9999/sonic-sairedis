@@ -357,24 +357,6 @@
 #include <vpp_plugins/sflow/sflow.api.h>
 #undef vl_api_version
 
-/* sonic_ext API inclusion */
-
-#define vl_typedefs
-#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
-#undef vl_typedefs
-
-#define vl_endianfun
-#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
-#undef vl_endianfun
-
-#define vl_calcsizefun
-#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
-#undef vl_calcsizefun
-
-#define vl_api_version(n, v) static u32 sonic_ext_api_version = v;
-#include <vpp_plugins/sonic_ext/sonic_ext.api.h>
-#undef vl_api_version
-
 /* BOND API inclusion */
 
 #define vl_typedefs
@@ -1881,16 +1863,6 @@ static void vl_api_add_node_next_reply_t_handler(
         }
         release_index(msg->context);
     }
-}
-
-static void
-vl_api_sw_interface_span_enable_disable_reply_t_handler(vl_api_sw_interface_span_enable_disable_reply_t *msg)
-{
-    int retval = (int)ntohl((uint32_t)msg->retval);
-    set_reply_status(retval);
-
-    if (retval) { SAIVPP_ERROR("span enable/disable failed(%d)", retval); }
-    else { SAIVPP_INFO("span enable/disable successful"); }
 }
 
 static void

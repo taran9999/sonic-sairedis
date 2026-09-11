@@ -461,13 +461,6 @@ sai_status_t SwitchVpp::acl_rule_field_update(
         rule->proto = value->aclfield.data.u8 & value->aclfield.mask.u8;
         break;
 
-    case SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS:
-        /*
-         * Not a per rule field: it names several ports, so it is applied by
-         * fanning the generated rules out over them in fill_acl_rules().
-         */
-        break;
-
     case SAI_ACL_ENTRY_ATTR_ACTION_PACKET_ACTION:
         // MIRROR action is sticky: if a prior MIRROR_INGRESS/EGRESS already set the
         // rule to PERMIT_MIRROR, do not let PACKET_ACTION clobber it (attribute order
