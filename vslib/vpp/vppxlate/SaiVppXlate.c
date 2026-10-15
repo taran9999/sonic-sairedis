@@ -2869,6 +2869,8 @@ int init_vpp_client()
         vpp_lcp_ethertype_enable(0x88cc);
         /* Enable ARP pass through in linux-cp */
         vpp_lcp_ethertype_enable(0x0806);
+        /* Enable EAPOL in linux-cp */
+        vpp_lcp_ethertype_enable(0x888e);
 
         /*
          * Bring up the dedicated event connection before subscribing to any
