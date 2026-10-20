@@ -105,6 +105,9 @@ namespace saivs
             virtual sai_status_t refresh_port_oper_speed(
                     _In_ sai_object_id_t port_id) override;
 
+            virtual sai_status_t refresh_macsec_sa_stat(
+                    _In_ sai_object_id_t object_id) override;
+
         private: // from vpp VirtualSwitchSaiInterface
 
             void setPortStats(

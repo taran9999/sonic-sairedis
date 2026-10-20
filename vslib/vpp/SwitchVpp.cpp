@@ -3046,3 +3046,25 @@ sai_status_t SwitchVpp::refresh_port_oper_speed(
 
     return SAI_STATUS_SUCCESS;
 }
+
+sai_status_t SwitchVpp::refresh_macsec_sa_stat(
+        _In_ sai_object_id_t object_id)
+{
+    SWSS_LOG_ENTER();
+
+    sai_attribute_t dir;
+    dir.id = SAI_MACSEC_SA_ATTR_MACSEC_DIRECTION;
+    CHECK_STATUS(get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &dir));
+
+    sai_attribute_t init;
+    init.id = (dir.value.s32 == SAI_MACSEC_DIRECTION_INGRESS) ? SAI_MACSEC_SA_ATTR_MINIMUM_INGRESS_XPN : SAI_MACSEC_SA_ATTR_CONFIGURED_EGRESS_XPN;
+    if(get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &init) != SAI_STATUS_SUCCESS) {
+        init.value.u64 = 1;
+    }
+
+    sai_attribute_t attr;
+    attr.id = SAI_MACSEC_SA_ATTR_CURRENT_XPN;
+    attr.value.u64 = init.value.u64;
+
+    return set(SAI_OBJECT_TYPE_MACSEC_SA, object_id, &attr);
+}
