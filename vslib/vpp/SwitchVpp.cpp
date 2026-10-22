@@ -3066,5 +3066,5 @@ sai_status_t SwitchVpp::refresh_macsec_sa_stat(
     attr.id = SAI_MACSEC_SA_ATTR_CURRENT_XPN;
     attr.value.u64 = init.value.u64;
 
-    return set(SAI_OBJECT_TYPE_MACSEC_SA, object_id, &attr);
+    return set_internal(SAI_OBJECT_TYPE_MACSEC_SA, sai_serialize_object_id(object_id), &attr);
 }
