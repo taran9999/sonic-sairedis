@@ -62,6 +62,8 @@
 
 #include <vpp_plugins/sonic_ext/sonic_ext.api_enum.h>
 #include <vpp_plugins/sonic_ext/sonic_ext.api_types.h>
+#include <vpp_plugins/sonic_ext/sonic_ext_macsec.api_enum.h>
+#include <vpp_plugins/sonic_ext/sonic_ext_macsec.api_types.h>
 
 #include <vlibmemory/vlib.api_types.h>
 #include <vlibmemory/memclnt.api_enum.h>
@@ -194,6 +196,24 @@
 
 #define vl_api_version(n, v) static u32 sonic_ext_api_version = v;
 #include <vpp_plugins/sonic_ext/sonic_ext.api.h>
+#undef vl_api_version
+
+/* sonic_ext_macsec API inclusion (separate msg-id base from sonic_ext.api) */
+
+#define vl_typedefs
+#include <vpp_plugins/sonic_ext/sonic_ext_macsec.api.h>
+#undef vl_typedefs
+
+#define vl_endianfun
+#include <vpp_plugins/sonic_ext/sonic_ext_macsec.api.h>
+#undef vl_endianfun
+
+#define vl_calcsizefun
+#include <vpp_plugins/sonic_ext/sonic_ext_macsec.api.h>
+#undef vl_calcsizefun
+
+#define vl_api_version(n, v) static u32 sonic_ext_macsec_api_version = v;
+#include <vpp_plugins/sonic_ext/sonic_ext_macsec.api.h>
 #undef vl_api_version
 
 /* interface API inclusion */
@@ -1567,6 +1587,46 @@ vl_api_sonic_ext_feature_get_reply_t_handler(vl_api_sonic_ext_feature_get_reply_
 }
 
 static void
+vl_api_sonic_ext_macsec_port_add_del_reply_t_handler(
+    vl_api_sonic_ext_macsec_port_add_del_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+}
+
+static void
+vl_api_sonic_ext_macsec_sc_add_del_reply_t_handler(
+    vl_api_sonic_ext_macsec_sc_add_del_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+}
+
+static void
+vl_api_sonic_ext_macsec_sc_set_encoding_an_reply_t_handler(
+    vl_api_sonic_ext_macsec_sc_set_encoding_an_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+}
+
+static void
+vl_api_sonic_ext_macsec_sa_add_del_reply_t_handler(
+    vl_api_sonic_ext_macsec_sa_add_del_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+}
+
+static void
+vl_api_sonic_ext_macsec_sa_set_xpn_reply_t_handler(
+    vl_api_sonic_ext_macsec_sa_set_xpn_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
+}
+
+static void
 vl_api_bfd_udp_set_tos_reply_t_handler (vl_api_bfd_udp_set_tos_reply_t *msg)
 {
     int retval = (int)ntohl((uint32_t)msg->retval);
@@ -2121,6 +2181,7 @@ static u16 ip_msg_id_base, ip_nbr_msg_id_base, lcp_msg_id_base;
 static u16 acl_msg_id_base;
 static u16 sflow_msg_id_base;
 static u16 sonic_ext_msg_id_base;
+static u16 sonic_ext_macsec_msg_id_base;
 static u16 policer_msg_id_base;
 
 static void vpp_ext_vpe_init(void)
@@ -2241,6 +2302,9 @@ vl_api_mpls_route_add_del_reply_t_handler (vl_api_mpls_route_add_del_reply_t *ms
 #define SONIC_EXT_MSG_ID(id) \
     (VL_API_##id + sonic_ext_msg_id_base)
 
+#define SONIC_EXT_MACSEC_MSG_ID(id) \
+    (VL_API_##id + sonic_ext_macsec_msg_id_base)
+
 #define foreach_vpe_plugin_api_reply_msg                                \
     _(LCP_MSG_ID(LCP_ITF_PAIR_ADD_DEL_REPLY), lcp_itf_pair_add_del_reply) \
     _(LCP_MSG_ID(LCP_ETHERTYPE_ENABLE_REPLY), lcp_ethertype_enable_reply) \
@@ -2270,6 +2334,11 @@ vl_api_mpls_route_add_del_reply_t_handler (vl_api_mpls_route_add_del_reply_t *ms
     _(SFLOW_MSG_ID(SFLOW_INTERFACE_DIRECTION_SET_REPLY), sflow_interface_direction_set_reply) \
     _(SONIC_EXT_MSG_ID(SONIC_EXT_IP2ME_ENABLE_DISABLE_REPLY), sonic_ext_ip2me_enable_disable_reply) \
     _(SONIC_EXT_MSG_ID(SONIC_EXT_FEATURE_GET_REPLY), sonic_ext_feature_get_reply) \
+    _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_PORT_ADD_DEL_REPLY), sonic_ext_macsec_port_add_del_reply) \
+    _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SC_ADD_DEL_REPLY), sonic_ext_macsec_sc_add_del_reply) \
+    _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SC_SET_ENCODING_AN_REPLY), sonic_ext_macsec_sc_set_encoding_an_reply) \
+    _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SA_ADD_DEL_REPLY), sonic_ext_macsec_sa_add_del_reply) \
+    _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SA_SET_XPN_REPLY), sonic_ext_macsec_sa_set_xpn_reply) \
     _(IPIP_MSG_ID(IPIP_ADD_TUNNEL_REPLY), ipip_add_tunnel_reply) \
     _(IPIP_MSG_ID(IPIP_DEL_TUNNEL_REPLY), ipip_del_tunnel_reply) \
     _(MPLS_MSG_ID(SW_INTERFACE_SET_MPLS_ENABLE_REPLY), sw_interface_set_mpls_enable_reply) \
@@ -2384,6 +2453,10 @@ static void get_base_msg_id()
     msg_base_lookup_name = format (0, "sonic_ext_%08x%c", sonic_ext_api_version, 0);
     sonic_ext_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
     assert(sonic_ext_msg_id_base != (u16) ~0);
+
+    msg_base_lookup_name = format (0, "sonic_ext_macsec_%08x%c", sonic_ext_macsec_api_version, 0);
+    sonic_ext_macsec_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
+    assert(sonic_ext_macsec_msg_id_base != (u16) ~0);
 }
 
 #define API_SOCKET_FILE "/run/vpp/api.sock"
@@ -7122,4 +7195,194 @@ vpp_get_swif_idx_by_name (const char *hwif_name)
     vat_main_t *vam = &vat_main;
     u32 idx = get_swif_idx(vam, hwif_name);
     return (idx == (u32)~0) ? (uint32_t)~0u : (uint32_t)idx;
+}
+
+int vpp_macsec_port_add_del(uint32_t sw_if_index, uint8_t direction,
+                            uint8_t encrypt, uint8_t send_sci,
+                            uint8_t replay_protect, uint32_t replay_window,
+                            bool is_add)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_macsec_port_add_del_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_macsec_msg_id_base;
+    M(SONIC_EXT_MACSEC_PORT_ADD_DEL, mp);
+
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->direction = direction;
+    mp->encrypt = encrypt;
+    mp->send_sci = send_sci;
+    mp->replay_protect = replay_protect;
+    mp->replay_window = htonl(replay_window);
+    mp->is_add = is_add;
+
+    S(mp);
+    WR(ret);
+
+    ret = vpp_normalize_ret(ret, !is_add, __func__);
+
+    if (ret) {
+        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u is_add %d",
+                     __func__, ret, sw_if_index, direction, is_add);
+    } else {
+        SAIVPP_INFO("%s sw_if %u dir %u encrypt %u send_sci %u is_add %d",
+                    __func__, sw_if_index, direction, encrypt, send_sci, is_add);
+    }
+
+    VPP_UNLOCK();
+    return ret;
+}
+
+int vpp_macsec_sc_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
+                          uint8_t cipher_suite, uint8_t explicit_sci,
+                          uint8_t conf_offset, bool is_add)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_macsec_sc_add_del_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_macsec_msg_id_base;
+    M(SONIC_EXT_MACSEC_SC_ADD_DEL, mp);
+
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->direction = direction;
+    mp->sci = clib_host_to_net_u64(sci);
+    mp->cipher_suite = cipher_suite;
+    mp->explicit_sci = explicit_sci;
+    mp->confidentiality_offset = conf_offset;
+    mp->is_add = is_add;
+
+    S(mp);
+    WR(ret);
+
+    ret = vpp_normalize_ret(ret, !is_add, __func__);
+
+    if (ret) {
+        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u sci 0x%llx cipher %u is_add %d",
+                     __func__, ret, sw_if_index, direction,
+                     (unsigned long long)sci, cipher_suite, is_add);
+    } else {
+        SAIVPP_INFO("%s sw_if %u dir %u sci 0x%llx cipher %u is_add %d",
+                    __func__, sw_if_index, direction,
+                    (unsigned long long)sci, cipher_suite, is_add);
+    }
+
+    VPP_UNLOCK();
+    return ret;
+}
+
+int vpp_macsec_sc_set_encoding_an(uint32_t sw_if_index, uint64_t sci, uint8_t an)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_macsec_sc_set_encoding_an_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_macsec_msg_id_base;
+    M(SONIC_EXT_MACSEC_SC_SET_ENCODING_AN, mp);
+
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->sci = clib_host_to_net_u64(sci);
+    mp->an = an;
+
+    S(mp);
+    WR(ret);
+
+    if (ret) {
+        SAIVPP_ERROR("%s failed(%d) sw_if %u sci 0x%llx an %u",
+                     __func__, ret, sw_if_index, (unsigned long long)sci, an);
+    } else {
+        SAIVPP_INFO("%s sw_if %u sci 0x%llx an %u",
+                    __func__, sw_if_index, (unsigned long long)sci, an);
+    }
+
+    VPP_UNLOCK();
+    return ret;
+}
+
+int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
+                          uint8_t an, const uint8_t sak[32], uint8_t sak_len,
+                          const uint8_t salt[12], uint32_t ssci, uint8_t xpn_en,
+                          uint64_t init_xpn, bool is_add)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_macsec_sa_add_del_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_macsec_msg_id_base;
+    M(SONIC_EXT_MACSEC_SA_ADD_DEL, mp);
+
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->direction = direction;
+    mp->sci = clib_host_to_net_u64(sci);
+    mp->an = an;
+    if (sak) {
+        memcpy(mp->sak, sak, sizeof(mp->sak));
+    }
+    mp->sak_len = sak_len;
+    if (salt) {
+        memcpy(mp->salt, salt, sizeof(mp->salt));
+    }
+    mp->ssci = htonl(ssci);
+    mp->xpn_en = xpn_en;
+    mp->init_xpn = clib_host_to_net_u64(init_xpn);
+    mp->is_add = is_add;
+
+    S(mp);
+    WR(ret);
+
+    ret = vpp_normalize_ret(ret, !is_add, __func__);
+
+    /* Do not log SAK or salt. */
+    if (ret) {
+        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u an %u sak_len %u xpn_en %u is_add %d",
+                     __func__, ret, sw_if_index, direction, an, sak_len, xpn_en, is_add);
+    } else {
+        SAIVPP_INFO("%s sw_if %u dir %u an %u sak_len %u xpn_en %u is_add %d",
+                    __func__, sw_if_index, direction, an, sak_len, xpn_en, is_add);
+    }
+
+    VPP_UNLOCK();
+    return ret;
+}
+
+int vpp_macsec_sa_set_xpn(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
+                          uint8_t an, uint64_t xpn)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_macsec_sa_set_xpn_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_macsec_msg_id_base;
+    M(SONIC_EXT_MACSEC_SA_SET_XPN, mp);
+
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->direction = direction;
+    mp->sci = clib_host_to_net_u64(sci);
+    mp->an = an;
+    mp->xpn = clib_host_to_net_u64(xpn);
+
+    S(mp);
+    WR(ret);
+
+    if (ret) {
+        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u an %u",
+                     __func__, ret, sw_if_index, direction, an);
+    } else {
+        SAIVPP_INFO("%s sw_if %u dir %u an %u",
+                    __func__, sw_if_index, direction, an);
+    }
+
+    VPP_UNLOCK();
+    return ret;
 }

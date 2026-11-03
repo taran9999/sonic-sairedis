@@ -574,6 +574,26 @@ typedef enum {
 
     extern int vpp_sonic_ext_ip2me_enable_disable(const char *hwif_name, bool enable);
     extern int vpp_sonic_ext_feature_get(const char *feature, bool *enabled);
+
+    /* sonic_ext MACsec SecY. sci/xpn are host-order here; wrappers put them
+     * on the wire as network-order u64. SAK/salt are never logged. */
+    extern int vpp_macsec_port_add_del(uint32_t sw_if_index, uint8_t direction,
+                                       uint8_t encrypt, uint8_t send_sci,
+                                       uint8_t replay_protect, uint32_t replay_window,
+                                       bool is_add);
+    extern int vpp_macsec_sc_add_del(uint32_t sw_if_index, uint8_t direction,
+                                     uint64_t sci, uint8_t cipher_suite,
+                                     uint8_t explicit_sci, uint8_t conf_offset,
+                                     bool is_add);
+    extern int vpp_macsec_sc_set_encoding_an(uint32_t sw_if_index, uint64_t sci,
+                                             uint8_t an);
+    extern int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction,
+                                     uint64_t sci, uint8_t an, const uint8_t sak[32],
+                                     uint8_t sak_len, const uint8_t salt[12],
+                                     uint32_t ssci, uint8_t xpn_en, uint64_t init_xpn,
+                                     bool is_add);
+    extern int vpp_macsec_sa_set_xpn(uint32_t sw_if_index, uint8_t direction,
+                                     uint64_t sci, uint8_t an, uint64_t xpn);
     extern int vpp_ipip_tunnel_add(vpp_ipip_tunnel_t *tunnel, uint32_t *sw_if_index);
     extern int vpp_ipip_tunnel_del(uint32_t sw_if_index);
     extern int sw_interface_set_unnumbered(uint32_t unnumbered_sw_if_index,
