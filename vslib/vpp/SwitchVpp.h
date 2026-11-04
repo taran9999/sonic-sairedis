@@ -108,6 +108,9 @@ namespace saivs
             virtual sai_status_t refresh_macsec_sa_stat(
                     _In_ sai_object_id_t object_id) override;
 
+            virtual sai_status_t refresh_macsec_sci_in_ingress_macsec_acl(
+                    _In_ sai_object_id_t object_id) override;
+
         private: // from vpp VirtualSwitchSaiInterface
 
             void setPortStats(
@@ -1071,6 +1074,9 @@ namespace saivs
             sai_status_t getAclTableId(
                     _In_ sai_object_id_t entry_id, sai_object_id_t *tbl_oid);
 
+            bool isMacsecAclTable(
+                    _In_ sai_object_id_t tbl_oid);
+
             sai_status_t AclTblConfig(
                     _In_ sai_object_id_t tbl_oid);
 
@@ -1737,6 +1743,12 @@ namespace saivs
                     _In_ uint32_t attr_count,
                     _In_ const sai_attribute_t *attr_list);
 
+            sai_status_t createMACsecFlow(
+                    _In_ sai_object_id_t object_id,
+                    _In_ sai_object_id_t switch_id,
+                    _In_ uint32_t attr_count,
+                    _In_ const sai_attribute_t *attr_list);
+
             sai_status_t createMACsecSC(
                     _In_ sai_object_id_t macsec_sa_id,
                     _In_ sai_object_id_t switch_id,
@@ -1748,6 +1760,9 @@ namespace saivs
                     _In_ sai_object_id_t switch_id,
                     _In_ uint32_t attr_count,
                     _In_ const sai_attribute_t *attr_list);
+
+            sai_status_t removeMACsecFlow(
+                    _In_ sai_object_id_t macsec_flow_id);
 
             sai_status_t removeMACsecPort(
                     _In_ sai_object_id_t macsec_port_id);
@@ -1772,7 +1787,14 @@ namespace saivs
                 uint32_t sw_if_index = ~0u;
                 uint8_t direction = 0;
                 sai_object_id_t port_id = SAI_NULL_OBJECT_ID;
+                sai_object_id_t flow_id = SAI_NULL_OBJECT_ID;
                 bool vpp_programmed = false;
+            };
+
+            struct VppMacsecFlowState {
+                uint32_t sw_if_index = ~0u;
+                sai_object_id_t port_id = SAI_NULL_OBJECT_ID;
+                uint8_t direction = 0;
             };
 
             struct VppMacsecScState {
@@ -1797,6 +1819,7 @@ namespace saivs
             };
 
             std::map<sai_object_id_t, VppMacsecPortState> m_vppMacsecPorts;
+            std::map<sai_object_id_t, VppMacsecFlowState> m_vppMacsecFlows;
             std::map<sai_object_id_t, VppMacsecScState> m_vppMacsecScs;
             std::map<sai_object_id_t, VppMacsecSaState> m_vppMacsecSas;
 

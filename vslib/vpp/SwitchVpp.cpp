@@ -1478,6 +1478,13 @@ sai_status_t SwitchVpp::create(
         return createMACsecPort(object_id, switch_id, attr_count, attr_list);
     }
 
+    if (object_type == SAI_OBJECT_TYPE_MACSEC_FLOW)
+    {
+        sai_object_id_t object_id;
+        sai_deserialize_object_id(serializedObjectId, object_id);
+        return createMACsecFlow(object_id, switch_id, attr_count, attr_list);
+    }
+
     if (object_type == SAI_OBJECT_TYPE_MACSEC_SC)
     {
         sai_object_id_t object_id;
@@ -1944,6 +1951,12 @@ sai_status_t SwitchVpp::remove(
         sai_deserialize_object_id(serializedObjectId, objectId);
         return removeMACsecPort(objectId);
     }
+    else if (object_type == SAI_OBJECT_TYPE_MACSEC_FLOW)
+    {
+        sai_object_id_t objectId;
+        sai_deserialize_object_id(serializedObjectId, objectId);
+        return removeMACsecFlow(objectId);
+    }
     else if (object_type == SAI_OBJECT_TYPE_MACSEC_SC)
     {
         sai_object_id_t objectId;
@@ -2140,6 +2153,11 @@ sai_status_t SwitchVpp::setAclEntry(
     if (getAclTableId(entry_id, &tbl_oid) != SAI_STATUS_SUCCESS)
     {
         return SAI_STATUS_FAILURE;
+    }
+
+    if (isMacsecAclTable(tbl_oid))
+    {
+        return SAI_STATUS_SUCCESS;
     }
 
     auto status = AclAddRemoveCheck(tbl_oid);
@@ -3047,24 +3065,53 @@ sai_status_t SwitchVpp::refresh_port_oper_speed(
     return SAI_STATUS_SUCCESS;
 }
 
+sai_status_t SwitchVpp::refresh_macsec_sci_in_ingress_macsec_acl(
+        _In_ sai_object_id_t object_id)
+{
+    SWSS_LOG_ENTER();
+
+    /*
+     * VPP SecY is per (sw_if, direction), not "SCI as an ACL field".
+     * False makes orchagent create one FLOW per MACsec PORT (in the same
+     * port task) so FLOW can be bound to sw_if_index without the ACL walk.
+     */
+    sai_attribute_t attr;
+    attr.id = SAI_MACSEC_ATTR_SCI_IN_INGRESS_MACSEC_ACL;
+    attr.value.booldata = false;
+
+    return set_internal(SAI_OBJECT_TYPE_MACSEC, sai_serialize_object_id(object_id), &attr);
+}
+
 sai_status_t SwitchVpp::refresh_macsec_sa_stat(
         _In_ sai_object_id_t object_id)
 {
     SWSS_LOG_ENTER();
 
+    uint64_t xpn = 1;
+
     sai_attribute_t dir;
     dir.id = SAI_MACSEC_SA_ATTR_MACSEC_DIRECTION;
-    CHECK_STATUS(get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &dir));
 
-    sai_attribute_t init;
-    init.id = (dir.value.s32 == SAI_MACSEC_DIRECTION_INGRESS) ? SAI_MACSEC_SA_ATTR_MINIMUM_INGRESS_XPN : SAI_MACSEC_SA_ATTR_CONFIGURED_EGRESS_XPN;
-    if(get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &init) != SAI_STATUS_SUCCESS) {
-        init.value.u64 = 1;
+    if (get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &dir) == SAI_STATUS_SUCCESS)
+    {
+        sai_attribute_t init;
+        init.id = (dir.value.s32 == SAI_MACSEC_DIRECTION_INGRESS)
+                ? SAI_MACSEC_SA_ATTR_MINIMUM_INGRESS_XPN
+                : SAI_MACSEC_SA_ATTR_CONFIGURED_EGRESS_XPN;
+
+        if (get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &init) == SAI_STATUS_SUCCESS
+                && init.value.u64 != 0)
+        {
+            xpn = init.value.u64;
+        }
     }
 
     sai_attribute_t attr;
     attr.id = SAI_MACSEC_SA_ATTR_CURRENT_XPN;
-    attr.value.u64 = init.value.u64;
+    attr.value.u64 = xpn;
 
-    return set_internal(SAI_OBJECT_TYPE_MACSEC_SA, sai_serialize_object_id(object_id), &attr);
+    /* Never fail CURRENT_XPN GET: FlexCounter skips COUNTERS_DB on error. */
+    (void)set_internal(SAI_OBJECT_TYPE_MACSEC_SA, sai_serialize_object_id(object_id), &attr);
+
+    return SAI_STATUS_SUCCESS;
 }

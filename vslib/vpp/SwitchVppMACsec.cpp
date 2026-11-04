@@ -90,6 +90,14 @@ sai_status_t SwitchVpp::bindMacsecScToPort(
         return SAI_STATUS_SUCCESS;
     }
 
+    auto flow_it = m_vppMacsecFlows.find(sc.flow_id);
+
+    if (flow_it != m_vppMacsecFlows.end() && flow_it->second.sw_if_index != ~0u)
+    {
+        sc.sw_if_index = flow_it->second.sw_if_index;
+        return SAI_STATUS_SUCCESS;
+    }
+
     sai_object_id_t port_id = SAI_NULL_OBJECT_ID;
 
     if (sc.flow_id != SAI_NULL_OBJECT_ID
@@ -229,6 +237,61 @@ sai_status_t SwitchVpp::createMACsecPort(
     return create_internal(SAI_OBJECT_TYPE_MACSEC_PORT, sid, switch_id, attr_count, attr_list);
 }
 
+sai_status_t SwitchVpp::createMACsecFlow(
+        _In_ sai_object_id_t object_id,
+        _In_ sai_object_id_t switch_id,
+        _In_ uint32_t attr_count,
+        _In_ const sai_attribute_t *attr_list)
+{
+    SWSS_LOG_ENTER();
+
+    auto dir_attr = sai_metadata_get_attr_by_id(
+            SAI_MACSEC_FLOW_ATTR_MACSEC_DIRECTION, attr_count, attr_list);
+
+    if (dir_attr == nullptr)
+    {
+        SWSS_LOG_ERROR("MACsec FLOW create missing DIRECTION");
+        return SAI_STATUS_MANDATORY_ATTRIBUTE_MISSING;
+    }
+
+    const uint8_t dir = static_cast<uint8_t>(dir_attr->value.s32);
+
+    /*
+     * orchagent creates PORT then FLOW in the same port task when
+     * SCI_IN_INGRESS_MACSEC_ACL is false, so there is exactly one unmatched
+     * MACSEC_PORT of this direction.
+     */
+    for (auto &kv : m_vppMacsecPorts)
+    {
+        if (kv.second.direction == dir
+                && kv.second.flow_id == SAI_NULL_OBJECT_ID)
+        {
+            kv.second.flow_id = object_id;
+
+            VppMacsecFlowState flow;
+            flow.sw_if_index = kv.second.sw_if_index;
+            flow.port_id = kv.second.port_id;
+            flow.direction = dir;
+            m_vppMacsecFlows[object_id] = flow;
+
+            SWSS_LOG_NOTICE("bound MACsec FLOW %s to port %s sw_if %u dir %u",
+                            sai_serialize_object_id(object_id).c_str(),
+                            sai_serialize_object_id(kv.first).c_str(),
+                            flow.sw_if_index, dir);
+            break;
+        }
+    }
+
+    if (m_vppMacsecFlows.find(object_id) == m_vppMacsecFlows.end())
+    {
+        SWSS_LOG_ERROR("MACsec FLOW %s dir %u has no unmatched PORT",
+                       sai_serialize_object_id(object_id).c_str(), dir);
+    }
+
+    auto sid = sai_serialize_object_id(object_id);
+    return create_internal(SAI_OBJECT_TYPE_MACSEC_FLOW, sid, switch_id, attr_count, attr_list);
+}
+
 sai_status_t SwitchVpp::createMACsecSC(
         _In_ sai_object_id_t object_id,
         _In_ sai_object_id_t switch_id,
@@ -309,8 +372,8 @@ sai_status_t SwitchVpp::createMACsecSC(
     }
     else
     {
-        SWSS_LOG_NOTICE("MACsec SC %s port not resolved yet; defer VPP program until SA create",
-                        sai_serialize_object_id(object_id).c_str());
+        SWSS_LOG_ERROR("MACsec SC %s port not resolved; VPP program deferred to SA create",
+                       sai_serialize_object_id(object_id).c_str());
     }
 
     m_vppMacsecScs[object_id] = sc;
@@ -373,12 +436,25 @@ sai_status_t SwitchVpp::createMACsecSA(
 
     CHECK_STATUS(programVppMacsecPortAndSc(sc));
 
-    uint8_t sak[32];
-    uint8_t sak_len = 0;
-    fillSak(sc.cipher_suite, sak_attr->value.macsecsak, sak, sak_len);
+    struct KeyWipe
+    {
+        uint8_t sak[32];
+        uint8_t salt[12];
+        KeyWipe()
+        {
+            memset(sak, 0, sizeof(sak));
+            memset(salt, 0, sizeof(salt));
+        }
+        ~KeyWipe()
+        {
+            memset(sak, 0, sizeof(sak));
+            memset(salt, 0, sizeof(salt));
+        }
+    } keys;
 
-    uint8_t salt[12];
-    memset(salt, 0, sizeof(salt));
+    uint8_t sak_len = 0;
+    fillSak(sc.cipher_suite, sak_attr->value.macsecsak, keys.sak, sak_len);
+
     uint32_t ssci = 0;
     uint8_t xpn_en = 0;
 
@@ -395,7 +471,7 @@ sai_status_t SwitchVpp::createMACsecSA(
             return SAI_STATUS_MANDATORY_ATTRIBUTE_MISSING;
         }
 
-        memcpy(salt, salt_attr->value.macsecsalt, sizeof(salt));
+        memcpy(keys.salt, salt_attr->value.macsecsalt, sizeof(keys.salt));
         ssci = ssci_attr->value.u32;
         xpn_en = 1;
     }
@@ -425,21 +501,18 @@ sai_status_t SwitchVpp::createMACsecSA(
             sc.direction,
             sc.sci,
             an_attr->value.u8,
-            sak,
+            keys.sak,
             sak_len,
-            salt,
+            keys.salt,
             ssci,
             xpn_en,
             init_xpn,
             true);
 
-    memset(sak, 0, sizeof(sak));
-    memset(salt, 0, sizeof(salt));
-
     if (ret != 0)
     {
-        SWSS_LOG_ERROR("vpp_macsec_sa_add_del failed ret %d sw_if %u dir %u an %u",
-                       ret, sc.sw_if_index, sc.direction, an_attr->value.u8);
+        SWSS_LOG_ERROR("vpp_macsec_sa_add_del failed ret %d sw_if %u dir %u an %u sak_len %u xpn_en %u",
+                       ret, sc.sw_if_index, sc.direction, an_attr->value.u8, sak_len, xpn_en);
         return SAI_STATUS_FAILURE;
     }
 
@@ -449,8 +522,22 @@ sai_status_t SwitchVpp::createMACsecSA(
 
         if (ret != 0)
         {
-            SWSS_LOG_ERROR("vpp_macsec_sc_set_encoding_an failed ret %d sw_if %u an %u",
-                           ret, sc.sw_if_index, an_attr->value.u8);
+            SWSS_LOG_ERROR("vpp_macsec_sc_set_encoding_an failed ret %d sw_if %u sci 0x%llx an %u",
+                           ret, sc.sw_if_index, (unsigned long long)sc.sci, an_attr->value.u8);
+            memset(keys.sak, 0, sizeof(keys.sak));
+            memset(keys.salt, 0, sizeof(keys.salt));
+            (void)vpp_macsec_sa_add_del(
+                    sc.sw_if_index,
+                    sc.direction,
+                    sc.sci,
+                    an_attr->value.u8,
+                    keys.sak,
+                    0,
+                    keys.salt,
+                    0,
+                    0,
+                    0,
+                    false);
             return SAI_STATUS_FAILURE;
         }
     }
@@ -467,7 +554,33 @@ sai_status_t SwitchVpp::createMACsecSA(
                     sa.sw_if_index, sa.direction, sa.an, sak_len, xpn_en);
 
     auto sid = sai_serialize_object_id(object_id);
-    return create_internal(SAI_OBJECT_TYPE_MACSEC_SA, sid, switch_id, attr_count, attr_list);
+    sai_status_t status = create_internal(SAI_OBJECT_TYPE_MACSEC_SA, sid, switch_id, attr_count, attr_list);
+
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        memset(keys.sak, 0, sizeof(keys.sak));
+        memset(keys.salt, 0, sizeof(keys.salt));
+        (void)vpp_macsec_sa_add_del(
+                sc.sw_if_index,
+                sc.direction,
+                sc.sci,
+                an_attr->value.u8,
+                keys.sak,
+                0,
+                keys.salt,
+                0,
+                0,
+                0,
+                false);
+        m_vppMacsecSas.erase(object_id);
+        return status;
+    }
+
+    sai_attribute_t xpn;
+    xpn.id = SAI_MACSEC_SA_ATTR_CURRENT_XPN;
+    xpn.value.u64 = init_xpn;
+
+    return set_internal(SAI_OBJECT_TYPE_MACSEC_SA, sid, &xpn);
 }
 
 sai_status_t SwitchVpp::removeMACsecSA(
@@ -558,6 +671,30 @@ sai_status_t SwitchVpp::removeMACsecSC(
     return remove_internal(SAI_OBJECT_TYPE_MACSEC_SC, sid);
 }
 
+sai_status_t SwitchVpp::removeMACsecFlow(
+        _In_ sai_object_id_t macsec_flow_id)
+{
+    SWSS_LOG_ENTER();
+
+    auto it = m_vppMacsecFlows.find(macsec_flow_id);
+
+    if (it != m_vppMacsecFlows.end())
+    {
+        for (auto &kv : m_vppMacsecPorts)
+        {
+            if (kv.second.flow_id == macsec_flow_id)
+            {
+                kv.second.flow_id = SAI_NULL_OBJECT_ID;
+            }
+        }
+
+        m_vppMacsecFlows.erase(it);
+    }
+
+    auto sid = sai_serialize_object_id(macsec_flow_id);
+    return remove_internal(SAI_OBJECT_TYPE_MACSEC_FLOW, sid);
+}
+
 sai_status_t SwitchVpp::removeMACsecPort(
         _In_ sai_object_id_t macsec_port_id)
 {
@@ -582,8 +719,26 @@ sai_status_t SwitchVpp::removeMACsecPort(
             }
         }
 
+        if (it->second.flow_id != SAI_NULL_OBJECT_ID)
+        {
+            m_vppMacsecFlows.erase(it->second.flow_id);
+        }
+
         const uint32_t sw_if_index = it->second.sw_if_index;
         const uint8_t direction = it->second.direction;
+
+        for (auto flow_it = m_vppMacsecFlows.begin(); flow_it != m_vppMacsecFlows.end(); )
+        {
+            if (flow_it->second.sw_if_index == sw_if_index
+                    && flow_it->second.direction == direction)
+            {
+                flow_it = m_vppMacsecFlows.erase(flow_it);
+            }
+            else
+            {
+                ++flow_it;
+            }
+        }
 
         for (auto sc_it = m_vppMacsecScs.begin(); sc_it != m_vppMacsecScs.end(); )
         {
