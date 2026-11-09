@@ -7197,6 +7197,19 @@ vpp_get_swif_idx_by_name (const char *hwif_name)
     return (idx == (u32)~0) ? (uint32_t)~0u : (uint32_t)idx;
 }
 
+/*
+ * SAI_MACSEC_SCI is an 8-octet string in host memory (MAC at the lowest
+ * address, port identifier at the highest). IEEE 802.1AE SecTAG/IV SCI is
+ * those octets as a big-endian u64. Convert once here so the plugin can
+ * keep using host_to_net_u64 store/load. Same transform as
+ * SwitchStateBaseMACsec.cpp (htobe64).
+ */
+static uint64_t
+vpp_macsec_sci_from_sai(uint64_t sai_sci)
+{
+    return htobe64(sai_sci);
+}
+
 int vpp_macsec_port_add_del(uint32_t sw_if_index, uint8_t direction,
                             uint8_t encrypt, uint8_t send_sci,
                             uint8_t replay_protect, uint32_t replay_window,
@@ -7251,7 +7264,7 @@ int vpp_macsec_sc_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
 
     mp->sw_if_index = htonl(sw_if_index);
     mp->direction = direction;
-    mp->sci = clib_host_to_net_u64(sci);
+    mp->sci = clib_host_to_net_u64(vpp_macsec_sci_from_sai(sci));
     mp->cipher_suite = cipher_suite;
     mp->explicit_sci = explicit_sci;
     mp->confidentiality_offset = conf_offset;
@@ -7288,7 +7301,7 @@ int vpp_macsec_sc_set_encoding_an(uint32_t sw_if_index, uint64_t sci, uint8_t an
     M(SONIC_EXT_MACSEC_SC_SET_ENCODING_AN, mp);
 
     mp->sw_if_index = htonl(sw_if_index);
-    mp->sci = clib_host_to_net_u64(sci);
+    mp->sci = clib_host_to_net_u64(vpp_macsec_sci_from_sai(sci));
     mp->an = an;
 
     S(mp);
@@ -7322,7 +7335,7 @@ int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
 
     mp->sw_if_index = htonl(sw_if_index);
     mp->direction = direction;
-    mp->sci = clib_host_to_net_u64(sci);
+    mp->sci = clib_host_to_net_u64(vpp_macsec_sci_from_sai(sci));
     mp->an = an;
     if (sak) {
         memcpy(mp->sak, sak, sizeof(mp->sak));
@@ -7368,7 +7381,7 @@ int vpp_macsec_sa_set_xpn(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
 
     mp->sw_if_index = htonl(sw_if_index);
     mp->direction = direction;
-    mp->sci = clib_host_to_net_u64(sci);
+    mp->sci = clib_host_to_net_u64(vpp_macsec_sci_from_sai(sci));
     mp->an = an;
     mp->xpn = clib_host_to_net_u64(xpn);
 

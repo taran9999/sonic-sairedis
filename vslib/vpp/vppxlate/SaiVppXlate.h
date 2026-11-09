@@ -575,8 +575,9 @@ typedef enum {
     extern int vpp_sonic_ext_ip2me_enable_disable(const char *hwif_name, bool enable);
     extern int vpp_sonic_ext_feature_get(const char *feature, bool *enabled);
 
-    /* sonic_ext MACsec SecY. sci/xpn are host-order here; wrappers put them
-     * on the wire as network-order u64. SAK/salt are never logged. */
+    /* sonic_ext MACsec SecY. sai sci is the SAI octet-string u64 (MAC in
+     * lowest address); wrappers convert it to an IEEE integer then put
+     * sci/xpn on the wire as network-order u64. SAK/salt are never logged. */
     extern int vpp_macsec_port_add_del(uint32_t sw_if_index, uint8_t direction,
                                        uint8_t encrypt, uint8_t send_sci,
                                        uint8_t replay_protect, uint32_t replay_window,
