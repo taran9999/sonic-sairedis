@@ -7356,11 +7356,13 @@ int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
 
     /* Do not log SAK or salt. */
     if (ret) {
-        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u an %u sak_len %u xpn_en %u is_add %d",
-                     __func__, ret, sw_if_index, direction, an, sak_len, xpn_en, is_add);
+        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u sci 0x%llx an %u sak_len %u xpn_en %u is_add %d",
+                     __func__, ret, sw_if_index, direction, (unsigned long long)sci,
+                     an, sak_len, xpn_en, is_add);
     } else {
-        SAIVPP_INFO("%s sw_if %u dir %u an %u sak_len %u xpn_en %u is_add %d",
-                    __func__, sw_if_index, direction, an, sak_len, xpn_en, is_add);
+        SAIVPP_INFO("%s sw_if %u dir %u sci 0x%llx an %u sak_len %u xpn_en %u is_add %d",
+                    __func__, sw_if_index, direction, (unsigned long long)sci,
+                    an, sak_len, xpn_en, is_add);
     }
 
     VPP_UNLOCK();
