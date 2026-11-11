@@ -338,10 +338,23 @@ sai_status_t SwitchVpp::createMACsecSC(
 
     auto replay_attr = sai_metadata_get_attr_by_id(
             SAI_MACSEC_SC_ATTR_MACSEC_REPLAY_PROTECTION_ENABLE, attr_count, attr_list);
-    sc.replay_protect = (replay_attr && replay_attr->value.booldata) ? 1 : 0;
-
     auto window_attr = sai_metadata_get_attr_by_id(
             SAI_MACSEC_SC_ATTR_MACSEC_REPLAY_PROTECTION_WINDOW, attr_count, attr_list);
+
+    /*
+     * orchagent never sends these attrs (wpa writes them to APPL_DB
+     * MACSEC_PORT_TABLE only). SAI defaults are enable=true, window=0
+     * for ingress SCs; apply those so 256_XPN_SCI actually replays.
+     */
+    if (sc.direction == SAI_MACSEC_DIRECTION_INGRESS)
+    {
+        sc.replay_protect =
+            (replay_attr == nullptr || replay_attr->value.booldata) ? 1 : 0;
+    }
+    else
+    {
+        sc.replay_protect = (replay_attr && replay_attr->value.booldata) ? 1 : 0;
+    }
     sc.replay_window = window_attr ? window_attr->value.u32 : 0;
 
     auto offset_attr = sai_metadata_get_attr_by_id(
