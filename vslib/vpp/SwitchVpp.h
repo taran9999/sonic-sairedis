@@ -1005,6 +1005,13 @@ namespace saivs
                     _In_ const sai_stat_id_t *counter_ids,
                     _Out_ uint64_t *counters);
 
+            sai_status_t getMacsecSaStats(
+                    _In_ sai_object_id_t object_id,
+                    _In_ uint32_t number_of_counters,
+                    _In_ const sai_stat_id_t *counter_ids,
+                    _In_ sai_stats_mode_t mode,
+                    _Out_ uint64_t *counters);
+
         protected: // CoPP: HOSTIF_TRAP / HOSTIF_TRAP_GROUP
 
             std::map<sai_object_id_t, vpp_trap_group_entry_t> m_trap_group_map;
@@ -1816,6 +1823,7 @@ namespace saivs
                 uint8_t direction = 0;
                 uint64_t sci = 0;
                 uint8_t an = 0;
+                uint32_t sa_index = ~0u;
             };
 
             std::map<sai_object_id_t, VppMacsecPortState> m_vppMacsecPorts;

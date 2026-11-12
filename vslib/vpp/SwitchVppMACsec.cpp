@@ -509,6 +509,7 @@ sai_status_t SwitchVpp::createMACsecSA(
         init_xpn = 1;
     }
 
+    uint32_t sa_index = ~0u;
     int ret = vpp_macsec_sa_add_del(
             sc.sw_if_index,
             sc.direction,
@@ -520,7 +521,8 @@ sai_status_t SwitchVpp::createMACsecSA(
             ssci,
             xpn_en,
             init_xpn,
-            true);
+            true,
+            &sa_index);
 
     if (ret != 0)
     {
@@ -550,7 +552,8 @@ sai_status_t SwitchVpp::createMACsecSA(
                     0,
                     0,
                     0,
-                    false);
+                    false,
+                    nullptr);
             return SAI_STATUS_FAILURE;
         }
     }
@@ -560,6 +563,7 @@ sai_status_t SwitchVpp::createMACsecSA(
     sa.direction = sc.direction;
     sa.sci = sc.sci;
     sa.an = an_attr->value.u8;
+    sa.sa_index = sa_index;
     m_vppMacsecSas[object_id] = sa;
 
     SWSS_LOG_NOTICE("programmed MACsec SA %s sw_if %u dir %u an %u sak_len %u xpn_en %u",
@@ -584,7 +588,8 @@ sai_status_t SwitchVpp::createMACsecSA(
                 0,
                 0,
                 0,
-                false);
+                false,
+                nullptr);
         m_vppMacsecSas.erase(object_id);
         return status;
     }
@@ -621,7 +626,8 @@ sai_status_t SwitchVpp::removeMACsecSA(
                 0,
                 0,
                 0,
-                false);
+                false,
+                nullptr);
 
         if (ret != 0)
         {

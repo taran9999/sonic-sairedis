@@ -17,6 +17,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <cstring>
 #include <cerrno>
 
 using namespace saivs;
@@ -1171,6 +1172,16 @@ sai_status_t SwitchVpp::getStatsExt(
     if (object_type == SAI_OBJECT_TYPE_POLICER)
     {
         return getPolicerStats(object_id, number_of_counters, counter_ids, counters);
+    }
+
+    if (object_type == SAI_OBJECT_TYPE_MACSEC_SA)
+    {
+        return getMacsecSaStats(
+                object_id,
+                number_of_counters,
+                counter_ids,
+                mode,
+                counters);
     }
 
     return SwitchStateBase::getStatsExt(
@@ -3082,27 +3093,139 @@ sai_status_t SwitchVpp::refresh_macsec_sci_in_ingress_macsec_acl(
     return set_internal(SAI_OBJECT_TYPE_MACSEC, sai_serialize_object_id(object_id), &attr);
 }
 
+sai_status_t SwitchVpp::getMacsecSaStats(
+        _In_ sai_object_id_t object_id,
+        _In_ uint32_t number_of_counters,
+        _In_ const sai_stat_id_t *counter_ids,
+        _In_ sai_stats_mode_t mode,
+        _Out_ uint64_t *counters)
+{
+    SWSS_LOG_ENTER();
+
+    VppMacsecSaState sa;
+    bool found = false;
+
+    {
+        auto it = m_vppMacsecSas.find(object_id);
+        if (it != m_vppMacsecSas.end())
+        {
+            sa = it->second;
+            found = true;
+        }
+    }
+
+    vpp_macsec_sa_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+
+    if (found && sa.sa_index != ~0u)
+    {
+        (void)vpp_macsec_sa_get_stats(sa.sa_index, &stats);
+    }
+
+    bool ingress = found && (sa.direction == SAI_MACSEC_DIRECTION_INGRESS);
+
+    for (uint32_t i = 0; i < number_of_counters; i++)
+    {
+        uint64_t v = 0;
+
+        switch (counter_ids[i])
+        {
+            case SAI_MACSEC_SA_STAT_OUT_PKTS_ENCRYPTED:
+                v = ingress ? 0 : stats.out_pkts_encrypted;
+                break;
+            case SAI_MACSEC_SA_STAT_OUT_PKTS_PROTECTED:
+                v = ingress ? 0 : stats.out_pkts_protected;
+                break;
+            case SAI_MACSEC_SA_STAT_OCTETS_PROTECTED:
+                v = ingress ? 0 : stats.octets_protected;
+                break;
+            case SAI_MACSEC_SA_STAT_OCTETS_ENCRYPTED:
+                v = ingress ? stats.in_octets_decrypted : stats.octets_encrypted;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_OK:
+                v = ingress ? stats.in_pkts_ok : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_INVALID:
+                v = ingress ? stats.in_pkts_invalid : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_NOT_VALID:
+                v = ingress ? stats.in_pkts_not_valid : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_LATE:
+                v = ingress ? stats.in_pkts_late : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_DELAYED:
+                v = ingress ? stats.in_pkts_delayed : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_UNCHECKED:
+                v = ingress ? stats.in_pkts_unchecked : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_NOT_USING_SA:
+                v = ingress ? stats.in_pkts_not_using_sa : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_PKTS_UNUSED_SA:
+                v = ingress ? stats.in_pkts_unused_sa : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_OCTETS_DECRYPTED:
+                v = ingress ? stats.in_octets_decrypted : 0;
+                break;
+            case SAI_MACSEC_SA_STAT_IN_OCTETS_VALIDATED:
+                v = ingress ? stats.in_octets_validated : 0;
+                break;
+            default:
+                v = 0;
+                break;
+        }
+
+        counters[i] = v;
+    }
+
+    if (found &&
+        (mode == SAI_STATS_MODE_READ_AND_CLEAR ||
+         mode == SAI_STATS_MODE_BULK_READ_AND_CLEAR ||
+         mode == SAI_STATS_MODE_BULK_CLEAR))
+    {
+        (void)vpp_macsec_sa_clear_stats(sa.sw_if_index, sa.direction, sa.sci, sa.an);
+    }
+
+    return SAI_STATUS_SUCCESS;
+}
+
 sai_status_t SwitchVpp::refresh_macsec_sa_stat(
         _In_ sai_object_id_t object_id)
 {
     SWSS_LOG_ENTER();
 
     uint64_t xpn = 1;
+    auto it = m_vppMacsecSas.find(object_id);
 
-    sai_attribute_t dir;
-    dir.id = SAI_MACSEC_SA_ATTR_MACSEC_DIRECTION;
-
-    if (get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &dir) == SAI_STATUS_SUCCESS)
+    if (it != m_vppMacsecSas.end() && it->second.sa_index != ~0u)
     {
-        sai_attribute_t init;
-        init.id = (dir.value.s32 == SAI_MACSEC_DIRECTION_INGRESS)
-                ? SAI_MACSEC_SA_ATTR_MINIMUM_INGRESS_XPN
-                : SAI_MACSEC_SA_ATTR_CONFIGURED_EGRESS_XPN;
-
-        if (get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &init) == SAI_STATUS_SUCCESS
-                && init.value.u64 != 0)
+        vpp_macsec_sa_stats_t stats;
+        memset(&stats, 0, sizeof(stats));
+        if (vpp_macsec_sa_get_stats(it->second.sa_index, &stats) == 0 &&
+            stats.current_xpn != 0)
         {
-            xpn = init.value.u64;
+            xpn = stats.current_xpn;
+        }
+    }
+    else
+    {
+        sai_attribute_t dir;
+        dir.id = SAI_MACSEC_SA_ATTR_MACSEC_DIRECTION;
+
+        if (get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &dir) == SAI_STATUS_SUCCESS)
+        {
+            sai_attribute_t init;
+            init.id = (dir.value.s32 == SAI_MACSEC_DIRECTION_INGRESS)
+                    ? SAI_MACSEC_SA_ATTR_MINIMUM_INGRESS_XPN
+                    : SAI_MACSEC_SA_ATTR_CONFIGURED_EGRESS_XPN;
+
+            if (get(SAI_OBJECT_TYPE_MACSEC_SA, object_id, 1, &init) == SAI_STATUS_SUCCESS
+                    && init.value.u64 != 0)
+            {
+                xpn = init.value.u64;
+            }
         }
     }
 

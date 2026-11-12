@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <endian.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <assert.h>
 #include "sai.h"
@@ -1616,6 +1617,22 @@ vl_api_sonic_ext_macsec_sa_add_del_reply_t_handler(
 {
     int retval = (int)ntohl((uint32_t)msg->retval);
     set_reply_status(retval);
+
+    if (msg->context) {
+        uint32_t *sa_index = (uint32_t *) get_index_ptr(msg->context);
+        if (sa_index) {
+            *sa_index = ntohl(msg->sa_index);
+            release_index(msg->context);
+        }
+    }
+}
+
+static void
+vl_api_sonic_ext_macsec_sa_clear_stats_reply_t_handler(
+    vl_api_sonic_ext_macsec_sa_clear_stats_reply_t *msg)
+{
+    int retval = (int)ntohl((uint32_t)msg->retval);
+    set_reply_status(retval);
 }
 
 static void
@@ -2339,6 +2356,7 @@ vl_api_mpls_route_add_del_reply_t_handler (vl_api_mpls_route_add_del_reply_t *ms
     _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SC_SET_ENCODING_AN_REPLY), sonic_ext_macsec_sc_set_encoding_an_reply) \
     _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SA_ADD_DEL_REPLY), sonic_ext_macsec_sa_add_del_reply) \
     _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SA_SET_XPN_REPLY), sonic_ext_macsec_sa_set_xpn_reply) \
+    _(SONIC_EXT_MACSEC_MSG_ID(SONIC_EXT_MACSEC_SA_CLEAR_STATS_REPLY), sonic_ext_macsec_sa_clear_stats_reply) \
     _(IPIP_MSG_ID(IPIP_ADD_TUNNEL_REPLY), ipip_add_tunnel_reply) \
     _(IPIP_MSG_ID(IPIP_DEL_TUNNEL_REPLY), ipip_del_tunnel_reply) \
     _(MPLS_MSG_ID(SW_INTERFACE_SET_MPLS_ENABLE_REPLY), sw_interface_set_mpls_enable_reply) \
@@ -7322,7 +7340,7 @@ int vpp_macsec_sc_set_encoding_an(uint32_t sw_if_index, uint64_t sci, uint8_t an
 int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
                           uint8_t an, const uint8_t sak[32], uint8_t sak_len,
                           const uint8_t salt[12], uint32_t ssci, uint8_t xpn_en,
-                          uint64_t init_xpn, bool is_add)
+                          uint64_t init_xpn, bool is_add, uint32_t *sa_index)
 {
     vat_main_t *vam = &vat_main;
     vl_api_sonic_ext_macsec_sa_add_del_t *mp;
@@ -7348,6 +7366,10 @@ int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
     mp->xpn_en = xpn_en;
     mp->init_xpn = clib_host_to_net_u64(init_xpn);
     mp->is_add = is_add;
+    if (is_add && sa_index) {
+        *sa_index = ~0u;
+        mp->context = store_ptr(sa_index);
+    }
 
     S(mp);
     WR(ret);
@@ -7396,6 +7418,90 @@ int vpp_macsec_sa_set_xpn(uint32_t sw_if_index, uint8_t direction, uint64_t sci,
     } else {
         SAIVPP_INFO("%s sw_if %u dir %u an %u",
                     __func__, sw_if_index, direction, an);
+    }
+
+    VPP_UNLOCK();
+    return ret;
+}
+
+static void handle_macsec_sa_stat(const char *stat_name, uint32_t index, uint64_t value, void *data)
+{
+    vpp_macsec_sa_stats_t *stats = (vpp_macsec_sa_stats_t *)data;
+
+    (void)index;
+    if (!stat_name || !stats) {
+        return;
+    }
+
+    if (strcmp(stat_name, "current-xpn") == 0) {
+        stats->current_xpn = value;
+    } else if (strcmp(stat_name, "out-pkts-encrypted") == 0) {
+        stats->out_pkts_encrypted += value;
+    } else if (strcmp(stat_name, "out-pkts-protected") == 0) {
+        stats->out_pkts_protected += value;
+    } else if (strcmp(stat_name, "octets-encrypted") == 0) {
+        stats->octets_encrypted += value;
+    } else if (strcmp(stat_name, "octets-protected") == 0) {
+        stats->octets_protected += value;
+    } else if (strcmp(stat_name, "in-pkts-ok") == 0) {
+        stats->in_pkts_ok += value;
+    } else if (strcmp(stat_name, "in-pkts-invalid") == 0) {
+        stats->in_pkts_invalid += value;
+    } else if (strcmp(stat_name, "in-pkts-not-valid") == 0) {
+        stats->in_pkts_not_valid += value;
+    } else if (strcmp(stat_name, "in-pkts-late") == 0) {
+        stats->in_pkts_late += value;
+    } else if (strcmp(stat_name, "in-pkts-delayed") == 0) {
+        stats->in_pkts_delayed += value;
+    } else if (strcmp(stat_name, "in-pkts-unchecked") == 0) {
+        stats->in_pkts_unchecked += value;
+    } else if (strcmp(stat_name, "in-pkts-not-using-sa") == 0) {
+        stats->in_pkts_not_using_sa += value;
+    } else if (strcmp(stat_name, "in-pkts-unused-sa") == 0) {
+        stats->in_pkts_unused_sa += value;
+    } else if (strcmp(stat_name, "in-octets-decrypted") == 0) {
+        stats->in_octets_decrypted += value;
+    } else if (strcmp(stat_name, "in-octets-validated") == 0) {
+        stats->in_octets_validated += value;
+    }
+}
+
+int vpp_macsec_sa_get_stats(uint32_t sa_index, vpp_macsec_sa_stats_t *stats)
+{
+    char path[64];
+
+    if (!stats) {
+        return -1;
+    }
+
+    memset(stats, 0, sizeof(*stats));
+    snprintf(path, sizeof(path), "/macsec/sa/%u/", sa_index);
+    return vpp_stats_dump(path, handle_macsec_sa_stat, NULL, stats);
+}
+
+int vpp_macsec_sa_clear_stats(uint32_t sw_if_index, uint8_t direction,
+                              uint64_t sci, uint8_t an)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sonic_ext_macsec_sa_clear_stats_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = sonic_ext_macsec_msg_id_base;
+    M(SONIC_EXT_MACSEC_SA_CLEAR_STATS, mp);
+
+    mp->sw_if_index = htonl(sw_if_index);
+    mp->direction = direction;
+    mp->sci = clib_host_to_net_u64(vpp_macsec_sci_from_sai(sci));
+    mp->an = an;
+
+    S(mp);
+    WR(ret);
+
+    if (ret) {
+        SAIVPP_ERROR("%s failed(%d) sw_if %u dir %u an %u",
+                     __func__, ret, sw_if_index, direction, an);
     }
 
     VPP_UNLOCK();

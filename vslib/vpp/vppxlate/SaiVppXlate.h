@@ -588,13 +588,34 @@ typedef enum {
                                      bool is_add);
     extern int vpp_macsec_sc_set_encoding_an(uint32_t sw_if_index, uint64_t sci,
                                              uint8_t an);
+    typedef struct _vpp_macsec_sa_stats {
+        uint64_t current_xpn;
+        uint64_t out_pkts_encrypted;
+        uint64_t out_pkts_protected;
+        uint64_t octets_encrypted;
+        uint64_t octets_protected;
+        uint64_t in_pkts_ok;
+        uint64_t in_pkts_invalid;
+        uint64_t in_pkts_not_valid;
+        uint64_t in_pkts_late;
+        uint64_t in_pkts_delayed;
+        uint64_t in_pkts_unchecked;
+        uint64_t in_pkts_not_using_sa;
+        uint64_t in_pkts_unused_sa;
+        uint64_t in_octets_decrypted;
+        uint64_t in_octets_validated;
+    } vpp_macsec_sa_stats_t;
+
     extern int vpp_macsec_sa_add_del(uint32_t sw_if_index, uint8_t direction,
                                      uint64_t sci, uint8_t an, const uint8_t sak[32],
                                      uint8_t sak_len, const uint8_t salt[12],
                                      uint32_t ssci, uint8_t xpn_en, uint64_t init_xpn,
-                                     bool is_add);
+                                     bool is_add, uint32_t *sa_index);
     extern int vpp_macsec_sa_set_xpn(uint32_t sw_if_index, uint8_t direction,
                                      uint64_t sci, uint8_t an, uint64_t xpn);
+    extern int vpp_macsec_sa_get_stats(uint32_t sa_index, vpp_macsec_sa_stats_t *stats);
+    extern int vpp_macsec_sa_clear_stats(uint32_t sw_if_index, uint8_t direction,
+                                         uint64_t sci, uint8_t an);
     extern int vpp_ipip_tunnel_add(vpp_ipip_tunnel_t *tunnel, uint32_t *sw_if_index);
     extern int vpp_ipip_tunnel_del(uint32_t sw_if_index);
     extern int sw_interface_set_unnumbered(uint32_t unnumbered_sw_if_index,
