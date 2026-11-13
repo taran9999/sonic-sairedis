@@ -8,6 +8,7 @@
 #include "vppxlate/SaiVppXlate.h"
 
 #include <cstring>
+#include <tuple>
 
 using namespace saivs;
 
@@ -395,6 +396,109 @@ sai_status_t SwitchVpp::createMACsecSC(
     return create_internal(SAI_OBJECT_TYPE_MACSEC_SC, sid, switch_id, attr_count, attr_list);
 }
 
+void SwitchVpp::destroyVppMacsecSa(
+        _In_ const VppMacsecSaState &sa)
+{
+    SWSS_LOG_ENTER();
+
+    uint8_t sak[32];
+    uint8_t salt[12];
+    memset(sak, 0, sizeof(sak));
+    memset(salt, 0, sizeof(salt));
+
+    int ret = vpp_macsec_sa_add_del(
+            sa.sw_if_index,
+            sa.direction,
+            sa.sci,
+            sa.an,
+            sak,
+            0,
+            salt,
+            0,
+            0,
+            0,
+            false,
+            nullptr);
+
+    if (ret != 0)
+    {
+        SWSS_LOG_WARN("vpp_macsec_sa_add_del(del) failed ret %d sw_if %u dir %u an %u",
+                      ret, sa.sw_if_index, sa.direction, sa.an);
+    }
+}
+
+void SwitchVpp::retireVppMacsecEgressSa(
+        _In_ const VppMacsecSaState &sa)
+{
+    SWSS_LOG_ENTER();
+
+    auto key = std::make_tuple(sa.sw_if_index, sa.direction, sa.sci);
+    auto it = m_vppMacsecRetiredEgressSas.find(key);
+
+    if (it != m_vppMacsecRetiredEgressSas.end())
+    {
+        if (it->second.an != sa.an)
+        {
+            destroyVppMacsecSa(it->second);
+        }
+        else
+        {
+            return;
+        }
+    }
+
+    m_vppMacsecRetiredEgressSas[key] = sa;
+    SWSS_LOG_NOTICE("retired egress MACsec SA sw_if %u sci 0x%llx an %u pending replacement",
+                    sa.sw_if_index, (unsigned long long)sa.sci, sa.an);
+}
+
+void SwitchVpp::commitRetiredVppMacsecEgressSa(
+        _In_ const VppMacsecSaState &new_sa)
+{
+    SWSS_LOG_ENTER();
+
+    auto key = std::make_tuple(new_sa.sw_if_index, new_sa.direction, new_sa.sci);
+    auto it = m_vppMacsecRetiredEgressSas.find(key);
+
+    if (it == m_vppMacsecRetiredEgressSas.end())
+    {
+        return;
+    }
+
+    if (it->second.an != new_sa.an)
+    {
+        destroyVppMacsecSa(it->second);
+    }
+
+    m_vppMacsecRetiredEgressSas.erase(it);
+}
+
+void SwitchVpp::dropRetiredVppMacsecEgressSa(
+        _In_ uint32_t sw_if_index,
+        _In_ uint8_t direction,
+        _In_ uint64_t sci)
+{
+    SWSS_LOG_ENTER();
+
+    if (sci != 0)
+    {
+        m_vppMacsecRetiredEgressSas.erase(std::make_tuple(sw_if_index, direction, sci));
+        return;
+    }
+
+    for (auto it = m_vppMacsecRetiredEgressSas.begin(); it != m_vppMacsecRetiredEgressSas.end(); )
+    {
+        if (std::get<0>(it->first) == sw_if_index && std::get<1>(it->first) == direction)
+        {
+            it = m_vppMacsecRetiredEgressSas.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 sai_status_t SwitchVpp::createMACsecSA(
         _In_ sai_object_id_t object_id,
         _In_ sai_object_id_t switch_id,
@@ -509,6 +613,18 @@ sai_status_t SwitchVpp::createMACsecSA(
         init_xpn = 1;
     }
 
+    if (sc.direction == SAI_MACSEC_DIRECTION_EGRESS)
+    {
+        auto key = std::make_tuple(sc.sw_if_index, sc.direction, sc.sci);
+        auto rit = m_vppMacsecRetiredEgressSas.find(key);
+
+        if (rit != m_vppMacsecRetiredEgressSas.end() && rit->second.an == an_attr->value.u8)
+        {
+            destroyVppMacsecSa(rit->second);
+            m_vppMacsecRetiredEgressSas.erase(rit);
+        }
+    }
+
     uint32_t sa_index = ~0u;
     int ret = vpp_macsec_sa_add_del(
             sc.sw_if_index,
@@ -566,6 +682,11 @@ sai_status_t SwitchVpp::createMACsecSA(
     sa.sa_index = sa_index;
     m_vppMacsecSas[object_id] = sa;
 
+    if (sc.direction == SAI_MACSEC_DIRECTION_EGRESS)
+    {
+        commitRetiredVppMacsecEgressSa(sa);
+    }
+
     SWSS_LOG_NOTICE("programmed MACsec SA %s sw_if %u dir %u an %u sak_len %u xpn_en %u",
                     sai_serialize_object_id(object_id).c_str(),
                     sa.sw_if_index, sa.direction, sa.an, sak_len, xpn_en);
@@ -610,29 +731,13 @@ sai_status_t SwitchVpp::removeMACsecSA(
 
     if (it != m_vppMacsecSas.end())
     {
-        uint8_t sak[32];
-        uint8_t salt[12];
-        memset(sak, 0, sizeof(sak));
-        memset(salt, 0, sizeof(salt));
-
-        int ret = vpp_macsec_sa_add_del(
-                it->second.sw_if_index,
-                it->second.direction,
-                it->second.sci,
-                it->second.an,
-                sak,
-                0,
-                salt,
-                0,
-                0,
-                0,
-                false,
-                nullptr);
-
-        if (ret != 0)
+        if (it->second.direction == SAI_MACSEC_DIRECTION_EGRESS)
         {
-            SWSS_LOG_WARN("vpp_macsec_sa_add_del(del) failed ret %d sw_if %u an %u",
-                          ret, it->second.sw_if_index, it->second.an);
+            retireVppMacsecEgressSa(it->second);
+        }
+        else
+        {
+            destroyVppMacsecSa(it->second);
         }
 
         m_vppMacsecSas.erase(it);
@@ -651,6 +756,8 @@ sai_status_t SwitchVpp::removeMACsecSC(
 
     if (it != m_vppMacsecScs.end())
     {
+        dropRetiredVppMacsecEgressSa(it->second.sw_if_index, it->second.direction, it->second.sci);
+
         if (it->second.vpp_programmed)
         {
             int ret = vpp_macsec_sc_add_del(
@@ -745,6 +852,8 @@ sai_status_t SwitchVpp::removeMACsecPort(
 
         const uint32_t sw_if_index = it->second.sw_if_index;
         const uint8_t direction = it->second.direction;
+
+        dropRetiredVppMacsecEgressSa(sw_if_index, direction, 0);
 
         for (auto flow_it = m_vppMacsecFlows.begin(); flow_it != m_vppMacsecFlows.end(); )
         {

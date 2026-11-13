@@ -31,6 +31,7 @@
 #include <queue>
 #include <set>
 #include <string>
+#include <tuple>
 
 #define BFD_MUTEX std::lock_guard<std::mutex> lock(bfdMapMutex);
 
@@ -1830,6 +1831,24 @@ namespace saivs
             std::map<sai_object_id_t, VppMacsecFlowState> m_vppMacsecFlows;
             std::map<sai_object_id_t, VppMacsecScState> m_vppMacsecScs;
             std::map<sai_object_id_t, VppMacsecSaState> m_vppMacsecSas;
+            // orchagent deletes the old egress SA before creating the new one
+            // (setEncodingAN). Keep the VPP SA as encoding until the replacement
+            // is programmed, then destroy it. Key is (sw_if_index, direction, sci).
+            std::map<std::tuple<uint32_t, uint8_t, uint64_t>, VppMacsecSaState> m_vppMacsecRetiredEgressSas;
+
+            void destroyVppMacsecSa(
+                    _In_ const VppMacsecSaState &sa);
+
+            void retireVppMacsecEgressSa(
+                    _In_ const VppMacsecSaState &sa);
+
+            void commitRetiredVppMacsecEgressSa(
+                    _In_ const VppMacsecSaState &new_sa);
+
+            void dropRetiredVppMacsecEgressSa(
+                    _In_ uint32_t sw_if_index,
+                    _In_ uint8_t direction,
+                    _In_ uint64_t sci);
 
             sai_status_t resolveMacsecSwIfIndex(
                     _In_ sai_object_id_t port_id,
