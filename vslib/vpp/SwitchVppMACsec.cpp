@@ -343,19 +343,14 @@ sai_status_t SwitchVpp::createMACsecSC(
             SAI_MACSEC_SC_ATTR_MACSEC_REPLAY_PROTECTION_WINDOW, attr_count, attr_list);
 
     /*
-     * orchagent never sends these attrs (wpa writes them to APPL_DB
-     * MACSEC_PORT_TABLE only). SAI defaults are enable=true, window=0
-     * for ingress SCs; apply those so 256_XPN_SCI actually replays.
+     * orchagent never sends these attrs (wpa writes enable_replay_protect
+     * to APPL_DB MACSEC_PORT_TABLE only). Defaulting omitted ingress
+     * attrs to SAI enable=true / window=0 made every new AN look late
+     * against the previous SA's XPN. Treat omitted as off so the
+     * datapath matches APPL_DB (256_XPN_SCI sets enable_replay_protect
+     * false). Honor the attrs when orchagent later passes them.
      */
-    if (sc.direction == SAI_MACSEC_DIRECTION_INGRESS)
-    {
-        sc.replay_protect =
-            (replay_attr == nullptr || replay_attr->value.booldata) ? 1 : 0;
-    }
-    else
-    {
-        sc.replay_protect = (replay_attr && replay_attr->value.booldata) ? 1 : 0;
-    }
+    sc.replay_protect = (replay_attr && replay_attr->value.booldata) ? 1 : 0;
     sc.replay_window = window_attr ? window_attr->value.u32 : 0;
 
     auto offset_attr = sai_metadata_get_attr_by_id(
